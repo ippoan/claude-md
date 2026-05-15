@@ -94,8 +94,8 @@ curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/insta
 
 | 段階 | 内容 | skip env |
 |---|---|---|
-| 1. **settings.json** | `.claude/settings.json.template` を `~/.claude/settings.json` に install (allow list 55 件 + SessionStart hook 登録) | `SKIP_SETTINGS=1` |
-| 2. **SessionStart hook 配置** | `.claude/hooks/session-start-install-hooks.sh` を `~/.claude/hooks/` に配置。**毎 session** で CCoW per-session git proxy 経由で yhonda-ohishi/claude-skills + claude-hooks を `~/.claude/sources/` に sync + skill symlink (詳細は次節) | `SKIP_HOOK=1` |
+| 1. **settings.json** | `.claude/settings.json.template` を `~/.claude/settings.json` に install (allow list 55 件 + SessionStart 2 hook + PreToolUse 1 hook 登録) | `SKIP_SETTINGS=1` |
+| 2. **hook scripts 配置** | `.claude/hooks/*.sh` を `~/.claude/hooks/` に 3 本配置: `session-start-install-hooks.sh` (毎 session で skills/hooks を proxy 経由 sync) + `session-start-snapshot.sh` (`~/.claude` baseline 作成) + `pre-tool-claude-dir-drift.sh` (`git commit` 時の drift 警告) | `SKIP_HOOK=1` |
 | 3. **cc-relay clone** | `ippoan/cc-relay` を shallow clone (`--depth 1`)。既存 `.git` があれば skip。`/home/user` がある環境 (CCoW) はそこへ、無ければ `$HOME/cc-relay` | `SKIP_CC_RELAY=1` |
 | 4. **cc-relay MCP server 登録** | `~/.claude.json` の `mcpServers["cc-relay"]` に `https://mcp.ippoan.org/mcp` (prod) を merge。既存 key は保持 | `SKIP_MCP=1` |
 
@@ -118,6 +118,29 @@ hook 内部処理:
 5. proxy URL を見つけられない / clone 失敗時は fail-open (additionalContext にエラー記録、session は継続)
 
 PAT も INTERNAL_SHARED_SECRET も CCoW env vars 追加も不要。CCoW の network allowlist にも変更不要 (127.0.0.1 のみ叩く)。
+
+### Drift 警告 hook (`session-start-snapshot.sh` + `pre-tool-claude-dir-drift.sh`)
+
+CCoW container は ephemeral。session 中に `~/.claude/settings.json` や `~/.claude/hooks/` を弄っても container 終了で消える。これを **`git commit` のタイミングで Claude に気付かせる** のが本 hook ペアの役割。意図的な変更なら claude-md template repo に sync back する fallback path を warning 内で提示する。
+
+| hook | trigger | 動作 |
+|---|---|---|
+| `session-start-snapshot.sh` | SessionStart | `~/.claude` 配下 (`*.json` / `*.sh` / `*.md` / `*.toml`、`projects/` `sources/` `cache/` `tool-results/` 除外) の sha256 baseline を `~/.claude/.session-snapshot` に保存 |
+| `pre-tool-claude-dir-drift.sh` | PreToolUse, matcher=`Bash` | `tool_input.command` に `git commit` が独立 subcommand として現れる場合のみ snapshot と現状を diff。差分があれば非 blocking warning を `additionalContext` で Claude に inject |
+
+挙動の特徴:
+
+- **非 blocking**: hook 終了 code は常に 0。`git commit` 自体は止めない。Claude に判断させる
+- **subcommand 境界判定**: `git commit-tree` / `git commit-graph` / path 中の `git commit` 等は false positive にならない (PR #5 のテストで pass)
+- **snapshot 不在時は静音**: 古い `install.sh` 由来の env で snapshot hook が未配置なら drift hook も何も出さない (graceful degrade)
+- **harness 実発火確認**: session 中盤で settings.json を上書きしても、**直後の Bash 呼び出しから** harness が新 hook を実行する ([検証 issue #6](https://github.com/ippoan/claude-md/issues/6))
+
+env override:
+
+| 変数 | 既定値 | 用途 |
+|---|---|---|
+| `CLAUDE_DRIFT_SNAPSHOT` | `$CLAUDE_HOME/.session-snapshot` | snapshot file path |
+| `CLAUDE_DRIFT_MAX_FILES` | `10` | warning に列挙する最大 file 数 |
 
 ### env override
 
@@ -149,7 +172,7 @@ PAT も INTERNAL_SHARED_SECRET も CCoW env vars 追加も不要。CCoW の netw
 
 ## Tool 使用許可テンプレート (`.claude/settings.json.template`)
 
-bootstrap の段階 1 で install される user-level template。`~/.claude/settings.json` に置けば repo attach に関係なく effective になる (= cross-repo の cc-relay / auth-worker / claude-hooks 系セッションで permission prompt を減らせる)。
+bootstrap の段階 1 で install される user-level template。`~/.claude/settings.json` に置けば repo attach に関係なく effective になる (= cross-repo の cc-relay / auth-worker / claude-hooks 系セッションで permission prompt を減らせる)。`hooks` セクションには SessionStart 2 本 + PreToolUse 1 本 (matcher=Bash) を登録済 (詳細は前節)。
 
 ### 中身 (要旨)
 
