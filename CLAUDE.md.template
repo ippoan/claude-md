@@ -1,0 +1,117 @@
+# CLAUDE.md
+
+<<REPO_PURPOSE_ONELINER>>
+
+このリポジトリで Claude Code セッションを動かす時の作業ガイド。本ファイルは
+[ippoan/claude-md](https://github.com/ippoan/claude-md) の `CLAUDE.md.template`
+から生成されている — 共通項を直すときは template を更新する。
+
+## まず読むもの
+
+- [`README.md`](./README.md) — `<<REPO_NAME>>` とは何か、ざっくり。
+- <<KEY_DOCS>>
+  - 例: [`ARCHITECTURE.md`](./ARCHITECTURE.md) — 設計の根拠 (一番下の現行 ADR 以外は履歴)
+  - 例: [`docs/<<TOPIC>>.md`](./docs/<<TOPIC>>.md) — 各論
+- [Project board](<<PROJECT_BOARD_URL>>) — フェーズ別ロードマップ。各 issue の
+  「完了条件」セクションが done の定義。
+
+## ブランチ運用 / Worktree
+
+- 作業は **`main` から切った短命ブランチ**上で行う。命名規則:
+  ```
+  <<BRANCH_NAMING_PATTERN>>
+  ```
+  - 推奨形式: `<issue-number>-<type>-<short-description>` (`type ∈ feat|fix|refactor|infra`)
+  - Claude Code が自動採番する `claude/<topic>-<sha>` で実装に入った場合は、
+    対応 issue を立てた上で上記形式に rename する
+- 並走するセッションが別 crate / 別 package を触る時は `git worktree` で分離:
+  ```sh
+  git worktree add ../<<REPO_NAME>>-issue-<N> <N>-<type>-<desc>
+  ```
+- **`main` に直接 push しない。** PR を開く → CI が green になれば
+  auto-merge ワークフローが自動 merge する (下の §「GitHub 自動化」)。
+- `git push --force` / `git commit --amend` / `git rebase -i` は `claude-hooks`
+  の `git-safe-push.sh` で block されている。
+
+## ビルド / テスト / lint
+
+PR を出す前に手元で全部 green であること:
+
+```sh
+<<BUILD_CMDS>>
+```
+
+CI (`.github/workflows/ci.yml` 等) は `main` への PR ごとに上を matrix で回す。
+**CI と同じコマンドを書く** こと — divergence させると後で痛む。
+
+## Hooks
+
+`.claude/settings.json` から呼び出すシェルスクリプトを使う場合の方針:
+
+- repo 内 `.claude/hooks/` 配下に置くか、`yhonda-ohishi/claude-hooks` の
+  centralised hook を delegate 呼び出しする (推奨)
+- versioning は sha256 ピン留め or release tag 参照
+- **Web-only な hook は `CLAUDE_CODE_REMOTE=true` 判定でローカルを skip**
+  ```bash
+  if [[ "${CLAUDE_CODE_REMOTE:-}" != "true" ]]; then exit 0; fi
+  ```
+- 環境変数を session に persist させたい場合は `$CLAUDE_ENV_FILE` に append
+- `~/.claude/settings.json` は **git 管理外**。登録例は本 CLAUDE.md か
+  `README.md` に必ず残す
+
+## GitHub 自動化
+
+### Auto-merge
+
+`.github/workflows/auto-merge.yml` が PR 作成時 (非 draft) に
+`gh pr merge --auto --squash` を叩く。実際の merge gate は `main` の
+ブランチ保護ルールが握る:
+
+- Settings → General → **Allow auto-merge** を ON
+- Settings → Branches → `main` の保護で 以下を **Required status checks** に追加:
+  ```
+  <<REQUIRED_STATUS_CHECKS>>
+  ```
+
+これらが無いと auto-merge は単に「PR を即時 squash merge」する挙動になる
+(ガードレール無し) — 必ず両方設定する。
+
+### PR description / commit message のキーワード
+
+- ❌ 使用禁止: `Closes #N` / `Fixes #N` / `Resolves #N`
+  - auto-merge が走った瞬間に issue が auto-close されるため、release tag 時の
+    close 確認 UI と整合しない
+- ✅ 使用推奨: `Refs #N` / `Related to #N` / `Part of #N`
+  - GitHub の Development セクションには紐付くが auto-close されない
+  - release tag 後に [ci-dashboard](https://github.com/ippoan/ci-dashboard) の
+    close 確認 UI で目視 close する
+
+PR template (`.github/pull_request_template.md`) で `Refs` を強制する。
+
+### Release
+
+タグは `workflow_dispatch` (`.github/workflows/tag-release.yml`) で発行する。
+ローカル `git tag v*` 直叩きは `claude-hooks` の `tag-release-userprompt-guard.sh`
+が user 明示指示なしに block する。
+
+## やってはいけないこと
+
+- **`main` に直 push しない** (proxy 側でも block されるが、習慣として)。
+- **force push / amend / rebase -i しない** — `git-safe-push.sh` が block する。
+- **`gh pr merge` をローカルで叩かない** — auto-merge に任せる。
+- **secret / 秘密鍵 (`.env`, `*.pem`, `*.key`) をコミットしない** — `.gitignore`
+  が守っているが、`git add -f` で強制追加しないこと。
+- **MVP target が green になる前に未検証 platform 向けの分岐コードを足さない**
+  — 例: Linux x86_64 が動く前に macOS arm64 用の cfg ブロックを入れる、等。
+- **`PROTOCOL_VERSION` 等の wire protocol 定数を後方互換を壊して触らない** —
+  破壊的変更時は必ず bump する。
+- **CI を green にするためだけのテスト無効化 / skip flag を入れない** — root cause
+  を直す。
+
+<<DOMAIN_SPECIFIC_SECTIONS>>
+
+---
+
+_このファイルは [`ippoan/claude-md`](https://github.com/ippoan/claude-md) の
+`CLAUDE.md.template` から生成されている。共通項を直すときは template 側を
+更新して全 consumer repo に propagate すること。_
