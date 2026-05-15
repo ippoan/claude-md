@@ -59,6 +59,41 @@ CI (`.github/workflows/ci.yml` 等) は `main` への PR ごとに上を matrix 
 - `~/.claude/settings.json` は **git 管理外**。登録例は本 CLAUDE.md か
   `README.md` に必ず残す
 
+### ⚠️ user-level 設定変更の 1 session 遅延
+
+CCoW environment + Claude Code の load 順により、以下 2 種類の変更は
+**当該 session には反映されず、次 session から有効** になる:
+
+| 対象 | 反映タイミング |
+|---|---|
+| `~/.claude/settings.json` の `permissions.allow/deny/ask` | 次 session |
+| `~/.claude/settings.json` の hook 登録 (`SessionStart` / `PreToolUse` 等) | 次 session |
+| `~/.claude.json` の `mcpServers` | 次 session |
+| `~/.claude/hooks/*.sh` の中身 | 即時 (各 hook 発火時に disk read) |
+| `~/.claude/skills/` / `sources/` | 即時 |
+| `/home/user/<repo>` 内 file | 即時 |
+
+理由: Claude Code は起動時 1 度だけ `settings.json` / `~/.claude.json` を
+read してメモリに hold し、session 中は再 read しない。一方 hook script
+本体は fire のたび disk から実行されるので即時反映される。
+
+[`ippoan/claude-md`](https://github.com/ippoan/claude-md) の
+`.claude/hooks/session-start-refresh-installer.sh` が毎 session 起動時に
+最新 install.sh を fetch して disk 上の hooks / mcpServers を更新するが、
+**Claude Code の in-memory state までは触れない** ため上記の遅延は不可避。
+
+参考:
+- [Claude Code on the web — Setup script cache 仕様](https://code.claude.com/docs/en/claude-code-on-the-web#environment-caching)
+- [`anthropics/claude-code` #30737 — Allow reloading permissions/settings in a running session](https://github.com/anthropics/claude-code/issues/30737)
+- [`anthropics/claude-code` #5513 — `/reloadSettings` command feature request](https://github.com/anthropics/claude-code/issues/5513)
+- [`anthropics/claude-code` #33829 — Hot-reload permissions from settings.local.json](https://github.com/anthropics/claude-code/issues/33829)
+
+→ permissions/mcpServers を即時反映したい場合のみ:
+1. CCoW UI で Setup script 欄を編集 (`# bust YYYYMMDD-HHMMSS` 等)
+2. 新規 session を起動 (resume では setup script は再走しない)
+
+それ以外の変更は何もせず次 session で勝手に反映される。
+
 ## GitHub 自動化
 
 ### Auto-merge
