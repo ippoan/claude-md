@@ -82,6 +82,41 @@ sed -i 's|<<REPO_NAME>>|cc-relay|g' CLAUDE.md
 で検証する仕組みは未実装 (issue 化 予定)。当面は consumer repo 側 PR レビュー
 で「template の対応セクションと矛盾していないか」を手目視確認する。
 
+## Tool 使用許可テンプレート (`.claude/settings.json.template`)
+
+Claude Code on Web の session で頻出するツール許可を 1 枚に集約した user-level template。
+`~/.claude/settings.json` に置けば repo attach に関係なく effective になる (= cross-repo の cc-relay / auth-worker / claude-hooks 系セッションで permission prompt を減らせる)。
+
+### install (session 冒頭で 1 回 paste)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/settings.json.template \
+  -o ~/.claude/settings.json
+```
+
+- Claude Code on Web の container は ephemeral なので、**新 session ごとに上記 one-liner を冒頭 prompt に貼り付ける**運用。
+- 書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
+- project-level `.claude/settings.json` (repo の中に commit する形) と併用可能。重複は project 側が勝つ。
+
+### 中身 (要旨)
+
+| 区分 | 例 |
+|---|---|
+| built-in tool | `Read` / `Edit` / `Write` / `Skill` / `ToolSearch` / `AskUserQuestion` |
+| Bash read-only | `ls:*` / `cat:*` / `head:*` / `tail:*` / `grep:*` / `find:*` / `pwd` / `which:*` / `env` / `env:*` |
+| Bash safe-write | `mkdir:*` / `chmod:*` / `cp:*` / `mv:*` / `ln:*` / `echo:*` |
+| Bash dev | `python3:*` / `curl:*` / `bash:*` / `ss:*` |
+| git | `git status/log/diff/branch/fetch/pull/push/add/commit/checkout/switch/rev-parse/ls-remote/config --get:*` |
+| GitHub MCP read | `mcp__github__{issue,pull_request}_read` / `*_file_contents` / `list_{releases,branches,commits,pull_requests,issues,...}` / `search_*` |
+| GitHub MCP write (低リスク) | `mcp__github__add_issue_comment` |
+| PR subscribe | `mcp__github__{subscribe,unsubscribe}_pr_activity` |
+
+**入れていないもの** (per-PR で都度承認したい): `merge_pull_request` / `create_pull_request` / `push_files` / `delete_file` / `create_repository` / `fork_repository` / `add_comment_to_pending_review` / 一般 Bash の `rm:*` / `git reset --hard` 等の破壊系。
+
+### derivation
+
+本 template の allow list は [ippoan/cc-relay#37](https://github.com/ippoan/cc-relay/issues/37) の Phase F acceptance session ([cse_…6bEte](https://github.com/ippoan/cc-relay/issues/37#issuecomment-4456995515)) で実際に叩いた tool から派生。新しい tool を追加する場合は同 issue にリンクして PR を切る。
+
 ## 関連
 
 - 検証セッションのきっかけ: [ippoan/cc-relay#37](https://github.com/ippoan/cc-relay/issues/37) Phase F 検証中に「5 repo の CLAUDE.md 揺らぎが大きすぎる」と判明
