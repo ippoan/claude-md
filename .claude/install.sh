@@ -41,8 +41,7 @@
 #                            このファイルの mtime と中身で「今 session で install.sh が
 #                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
 #   CLAUDE_MD_INSTALL_URL    session-start-refresh-installer.sh が fetch する
-#                            install.sh URL (default: main raw)。Pinned release を
-#                            常用する場合は release asset URL を指す
+#                            install.sh URL (default: main raw)
 #   CLAUDE_REFRESH_MARKER    refresh marker path
 #                            (default: $CLAUDE_HOME/.refresh-installer-marker)
 #   CLAUDE_REFRESH_TTL       refresh hook の network check skip TTL 秒 (default: 300)

@@ -86,22 +86,20 @@ sed -i 's|<<REPO_NAME>>|cc-relay|g' CLAUDE.md
 
 Claude Code on the Web の session を立ち上げた直後の user-level セットアップを 1 本に集約した bootstrap script。
 
-### Setup script に貼る URL — 2 パターン
-
-#### A. **raw URL (推奨)** — 1 回 paste したら原則編集しない
+### Setup script に貼る URL (1 回だけ paste、以降編集しない)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
 ```
 
-main の最新を fetch。`SessionStart` hook の `session-start-refresh-installer.sh` が **毎 session 起動時** に同じ URL から install.sh を再 fetch して、disk 上 sha と diff があれば再 run する。つまり hooks / install.sh logic / skills / cc-relay clone の更新は **Setup script 欄を一切触らずに自動で配布される**。
+main の最新を fetch。`SessionStart` hook の `session-start-refresh-installer.sh` が **毎 session 起動時** に同じ URL から install.sh を再 fetch し、disk 上 sha と diff があれば再 run する。hooks / install.sh logic / skills / cc-relay clone の更新は **Setup script 欄を一切触らずに自動で配布される**。
 
-**ただし 1 session 遅延する例外あり** ([CLAUDE.md.template の対応セクション](./CLAUDE.md.template) と下記参照):
+**ただし 1 session 遅延する例外**:
 
 - `~/.claude/settings.json` の `permissions` 追加・hook 登録の追加
 - `~/.claude.json` の `mcpServers` 追加
 
-これらは Claude Code が起動時 1 度だけ read してメモリに hold するため、**変更が反映されるのは次 session から**。即時反映したい場合のみ Setup script 欄を編集して bust する:
+Claude Code が起動時に 1 度だけ read してメモリに hold するため、これらの変更は **次 session から有効**。即時反映したい場合のみ Setup script 欄を bust:
 
 ```sh
 # bust 20260515-093000   ← 数字を変えてから保存
@@ -109,18 +107,6 @@ curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/insta
 ```
 
 CI workflow `.github/workflows/stamp-install-sh-version.yml` が main への push のたびに `INSTALL_SH_VERSION` を `YYYY.MM.DD-HHMMSS-<short-SHA>` に書き換えるので、`~/.claude/.install-stamp` を `cat` すれば deploy 済 version が即わかる。
-
-#### B. Pinned release — version を semantic に pin したい場合
-
-[最新の installer release](https://github.com/ippoan/claude-md/releases/latest) の tag を埋め込んで:
-
-```sh
-curl -fsSL https://github.com/ippoan/claude-md/releases/download/installer-2026.05.15-085530-eb3f141/install.sh | bash
-```
-
-tag は `installer-YYYY.MM.DD-HHMMSS-<short-SHA>` 形式 ([`release-installer.yml`](./.github/workflows/release-installer.yml) が自動生成)。**A と異なり auto-refresh は同じ tag URL に向かって動くので、pin した version より新しいリリースは自動で取らない**。release asset の `INSTALL_SH_VERSION` は tag 名そのものなので、`~/.claude/.install-stamp` を見れば deploy 済 version が即わかる + 切り戻しが trivial。
-
-新 version に切り替えたいときは URL の tag を差し替えて保存し直す。
 
 ### 参考
 
@@ -172,7 +158,7 @@ env override:
 
 | 変数 | 既定値 | 用途 |
 |---|---|---|
-| `CLAUDE_MD_INSTALL_URL` | `https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh` | refresh hook が fetch する install.sh URL。Pinned release を使う場合は `releases/download/<tag>/install.sh` を指す |
+| `CLAUDE_MD_INSTALL_URL` | `https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh` | refresh hook が fetch する install.sh URL |
 | `CLAUDE_REFRESH_MARKER` | `$CLAUDE_HOME/.refresh-installer-marker` | 最後に install した install.sh の sha256 を保存 |
 | `CLAUDE_REFRESH_TTL` | `300` | network check skip TTL (秒) |
 
@@ -241,7 +227,7 @@ env override:
 
 - **session 冒頭で 1 回 paste** — 1 行 (上記の A or B) を冒頭 prompt に貼り付け。書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
 - **CCoW environment の Setup script に登録 (推奨)** — Environment → Setup script 欄に同じ 1 行を貼ると container 起動時に 1 回走る。毎 session の paste 不要。詳細は https://code.claude.com/docs/en/claude-code-on-the-web 。
-- 更新フロー: Pinned release を使っている場合は新 tag に差し替え + 保存 → 次 session で新 install.sh。raw URL を使っている場合は `# bust YYYYMMDD-HHMMSS` を編集 + 保存 → 次 session で新 install.sh。
+- 更新フロー: 通常は何もしない (`session-start-refresh-installer.sh` が毎 session 自動で main の最新を取り直す)。permissions/mcpServers の追加だけ即時反映が必要なら `# bust YYYYMMDD-HHMMSS` を編集 + 保存 → 次 session で新 install.sh。
 
 ### A/B 共通
 
