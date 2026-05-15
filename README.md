@@ -94,27 +94,46 @@ curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/insta
 
 | 段階 | 内容 | skip env |
 |---|---|---|
-| 1. **settings.json** | `.claude/settings.json.template` を `~/.claude/settings.json` に install (allow list 55 件) | `SKIP_SETTINGS=1` |
-| 2. **claude-hooks chain** | `yhonda-ohishi/claude-hooks/install.sh` を pipe to bash。claude-skills / claude-hooks を `~/.claude/sources/` に clone + skill symlink (claude-hooks 側が idempotent / TTL 1h)。**private repo で 404 等の場合は warn だけ出して continue** | `SKIP_HOOKS=1` |
+| 1. **settings.json** | `.claude/settings.json.template` を `~/.claude/settings.json` に install (allow list 55 件 + SessionStart hook 登録) | `SKIP_SETTINGS=1` |
+| 2. **SessionStart hook 配置** | `.claude/hooks/session-start-install-hooks.sh` を `~/.claude/hooks/` に配置。**毎 session** で CCoW per-session git proxy 経由で yhonda-ohishi/claude-skills + claude-hooks を `~/.claude/sources/` に sync + skill symlink (詳細は次節) | `SKIP_HOOK=1` |
 | 3. **cc-relay clone** | `ippoan/cc-relay` を shallow clone (`--depth 1`)。既存 `.git` があれば skip。`/home/user` がある環境 (CCoW) はそこへ、無ければ `$HOME/cc-relay` | `SKIP_CC_RELAY=1` |
 | 4. **cc-relay MCP server 登録** | `~/.claude.json` の `mcpServers["cc-relay"]` に `https://mcp.ippoan.org/mcp` (prod) を merge。既存 key は保持 | `SKIP_MCP=1` |
 
-`set -eu` で 1 (必須) は失敗時 Setup script を fail させる。2〜4 は accessibility 失敗時に warn だけ出して継続 (アクセスできないものは黙って skip するのが趣旨)。
+`set -eu` で 1〜2 は失敗時 Setup script を fail させる (curl から claude-md 自身を取れない時点で先に進めても無意味)。3〜4 は accessibility 失敗時に warn だけ出して継続。
+
+### SessionStart hook (`session-start-install-hooks.sh`)
+
+claude-skills / claude-hooks を取得する処理を **SessionStart hook に分離した理由**:
+
+- Setup script 時点では attached repo が clone される前なので、CCoW の git proxy URL (`http://local_proxy@127.0.0.1:<port>/git/…`) を discover できない
+- raw.githubusercontent.com を anonymous で叩いても private repo (yhonda-ohishi/*) は 404 になる
+- SessionStart hook なら毎 session attached repo の `.git/config` から proxy URL を抜き出せる。そして CCoW の scoped credential が yhonda-ohishi/* にも valid
+
+hook 内部処理:
+
+1. `/home/user/*/` を走査して `.git/config` から `http://local_proxy@127.0.0.1:<port>/git` 部分を抽出
+2. その proxy URL を base に `git clone --depth 1 …/yhonda-ohishi/{claude-skills,claude-hooks}` を `~/.claude/sources/` に展開 (既存なら `fetch --depth 1 + reset --hard`)
+3. `~/.claude/sources/claude-skills/<name>/SKILL.md` を `~/.claude/skills/<name>` に symlink (既存の非 symlink = user 手書きは触らない)
+4. TTL (`CLAUDE_HOOKS_INSTALL_TTL`, default 3600s) 内は network sync を skip。symlink 更新だけ実施
+5. proxy URL を見つけられない / clone 失敗時は fail-open (additionalContext にエラー記録、session は継続)
+
+PAT も INTERNAL_SHARED_SECRET も CCoW env vars 追加も不要。CCoW の network allowlist にも変更不要 (127.0.0.1 のみ叩く)。
 
 ### env override
-
-全段階に共通の override:
 
 | 変数 | 既定値 | 用途 |
 |---|---|---|
 | `CLAUDE_MD_TEMPLATE_URL` | `…/ippoan/claude-md/main/.claude/settings.json.template` | settings.json template の URL |
-| `CLAUDE_SETTINGS_DEST` | `/root/.claude/settings.json` | settings.json install 先 |
+| `CLAUDE_HOOK_URL` | `…/ippoan/claude-md/main/.claude/hooks/session-start-install-hooks.sh` | SessionStart hook script の URL |
+| `CLAUDE_HOME` | `/root/.claude` | `.claude` dir |
+| `CLAUDE_SETTINGS_DEST` | `$CLAUDE_HOME/settings.json` | settings.json install 先 |
 | `CLAUDE_JSON_DEST` | `/root/.claude.json` | MCP 登録先 |
-| `CLAUDE_HOOKS_INSTALL_URL` | `…/yhonda-ohishi/claude-hooks/master/install.sh` | claude-hooks installer URL (fork / private mirror に差し替え可) |
 | `CC_RELAY_REPO` | `https://github.com/ippoan/cc-relay.git` | cc-relay clone URL |
 | `CC_RELAY_DIR` | `/home/user/cc-relay` (CCoW) / `$HOME/cc-relay` | cc-relay clone 先 |
 | `CC_RELAY_MCP_URL` | `https://mcp.ippoan.org/mcp` (prod) | user-level MCP server URL。staging 切替: `https://mcp-staging.ippoan.org/mcp` |
-| `SKIP_SETTINGS` / `SKIP_HOOKS` / `SKIP_CC_RELAY` / `SKIP_MCP` | unset | `1` で各段階 skip |
+| `SKIP_SETTINGS` / `SKIP_HOOK` / `SKIP_CC_RELAY` / `SKIP_MCP` | unset | `1` で各段階 skip |
+| `CLAUDE_HOOKS_INSTALL_TTL` | `3600` | hook 側: network sync を skip する TTL (秒) |
+| `CLAUDE_HOOKS_SCAN_DIRS` | `/home/user` | hook 側: attached repo を探す親 dir |
 
 ### 運用
 
@@ -124,8 +143,8 @@ curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/insta
 ### A/B 共通
 
 - 各段階で `[install.sh] …` プレフィクス付きでログを出すので、Setup script ログ / session の最初の Bash 結果で成否を確認できる。
+- SessionStart hook の結果は session 起動時の hook log (additionalContext) で確認できる: `install-hooks: synced via proxy (skills=28) ok` 等
 - project-level `.claude/settings.json` (repo の中に commit する形) と併用可能。重複は project 側が勝つ。
-- private repo の chain (claude-hooks/claude-skills) はデフォルト URL では anonymous accessibility check に失敗する。fork を public 化するか `CLAUDE_HOOKS_INSTALL_URL` をネットワーク到達可能な mirror に差し替える。
 
 ## Tool 使用許可テンプレート (`.claude/settings.json.template`)
 

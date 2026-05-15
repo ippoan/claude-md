@@ -58,5 +58,18 @@
       "mcp__github__subscribe_pr_activity",
       "mcp__github__unsubscribe_pr_activity"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.claude/hooks/session-start-install-hooks.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
   }
 }
