@@ -88,7 +88,29 @@ Claude Code on the Web の session を立ち上げた直後の user-level セッ
 
 ### Setup script に貼る URL — 2 パターン
 
-#### A. **Pinned release (推奨)** — version が `.install-stamp` に焼き込まれる + cache 切り替えが意味付け可能
+#### A. **raw URL (推奨)** — 1 回 paste したら原則編集しない
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
+```
+
+main の最新を fetch。`SessionStart` hook の `session-start-refresh-installer.sh` が **毎 session 起動時** に同じ URL から install.sh を再 fetch して、disk 上 sha と diff があれば再 run する。つまり hooks / install.sh logic / skills / cc-relay clone の更新は **Setup script 欄を一切触らずに自動で配布される**。
+
+**ただし 1 session 遅延する例外あり** ([CLAUDE.md.template の対応セクション](./CLAUDE.md.template) と下記参照):
+
+- `~/.claude/settings.json` の `permissions` 追加・hook 登録の追加
+- `~/.claude.json` の `mcpServers` 追加
+
+これらは Claude Code が起動時 1 度だけ read してメモリに hold するため、**変更が反映されるのは次 session から**。即時反映したい場合のみ Setup script 欄を編集して bust する:
+
+```sh
+# bust 20260515-093000   ← 数字を変えてから保存
+curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
+```
+
+CI workflow `.github/workflows/stamp-install-sh-version.yml` が main への push のたびに `INSTALL_SH_VERSION` を `YYYY.MM.DD-HHMMSS-<short-SHA>` に書き換えるので、`~/.claude/.install-stamp` を `cat` すれば deploy 済 version が即わかる。
+
+#### B. Pinned release — version を semantic に pin したい場合
 
 [最新の installer release](https://github.com/ippoan/claude-md/releases/latest) の tag を埋め込んで:
 
@@ -96,26 +118,22 @@ Claude Code on the Web の session を立ち上げた直後の user-level セッ
 curl -fsSL https://github.com/ippoan/claude-md/releases/download/installer-2026.05.15-085530-eb3f141/install.sh | bash
 ```
 
-tag は `installer-YYYY.MM.DD-HHMMSS-<short-SHA>` 形式。新 release を切ったらこの URL の tag 部分を差し替えて Setup script を保存し直すと、CCoW env cache が invalidate され次 session で新 install.sh が走る。release asset の `INSTALL_SH_VERSION` は tag 名そのものなので、`~/.claude/.install-stamp` を見れば deploy 済 version が即わかる。
+tag は `installer-YYYY.MM.DD-HHMMSS-<short-SHA>` 形式 ([`release-installer.yml`](./.github/workflows/release-installer.yml) が自動生成)。**A と異なり auto-refresh は同じ tag URL に向かって動くので、pin した version より新しいリリースは自動で取らない**。release asset の `INSTALL_SH_VERSION` は tag 名そのものなので、`~/.claude/.install-stamp` を見れば deploy 済 version が即わかる + 切り戻しが trivial。
 
-releases は `.claude/{install.sh,hooks/**,settings.json.template}` のいずれかが main で変わったときに `.github/workflows/release-installer.yml` が自動生成する。
+新 version に切り替えたいときは URL の tag を差し替えて保存し直す。
 
-#### B. raw URL — 常に main の最新を取る
+### 参考
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
-```
-
-main の最新を fetch。ただし **CCoW env cache** は Setup script 欄の text hash で判定されるため、main 側で install.sh が更新されてもこの URL のままだと cache hit で旧版が install されたままになる。**raw URL を使う場合は `# bust YYYYMMDD-HHMMSS` のような行を追加して保存し直す** ことで cache invalidate を強制する必要がある。
-
-raw URL でも `.github/workflows/stamp-install-sh-version.yml` が main push のたびに `INSTALL_SH_VERSION` を `YYYY.MM.DD-HHMMSS-<short-SHA>` に書き換えるので、`.install-stamp` 上で「いつ deploy された install.sh か」は判別できる。
+- [Claude Code on the web — Setup script cache 仕様](https://code.claude.com/docs/en/claude-code-on-the-web#environment-caching) — 公式 docs
+- [`anthropics/claude-code` #30737](https://github.com/anthropics/claude-code/issues/30737) — Allow reloading permissions/settings in a running session
+- [`anthropics/claude-code` #5513](https://github.com/anthropics/claude-code/issues/5513) — `/reloadSettings` command feature request
 
 ### 何が走るか
 
 | 段階 | 内容 | skip env |
 |---|---|---|
-| 1. **settings.json** | `.claude/settings.json.template` を `~/.claude/settings.json` に install (allow list 55 件 + SessionStart 2 hook + PreToolUse 1 hook 登録) | `SKIP_SETTINGS=1` |
-| 2. **hook scripts 配置** | `.claude/hooks/*.sh` を `~/.claude/hooks/` に 3 本配置: `session-start-install-hooks.sh` (毎 session で skills/hooks を proxy 経由 sync) + `session-start-snapshot.sh` (`~/.claude` baseline 作成) + `pre-tool-claude-dir-drift.sh` (`git commit` 時の drift 警告) | `SKIP_HOOK=1` |
+| 1. **settings.json** | `.claude/settings.json.template` を `~/.claude/settings.json` に install (allow list 55 件 + SessionStart 3 hook + PreToolUse 1 hook 登録) | `SKIP_SETTINGS=1` |
+| 2. **hook scripts 配置** | `.claude/hooks/*.sh` を `~/.claude/hooks/` に 4 本配置: `session-start-install-hooks.sh` (毎 session で skills/hooks を proxy 経由 sync) + `session-start-snapshot.sh` (`~/.claude` baseline 作成) + `pre-tool-claude-dir-drift.sh` (`git commit` 時の drift 警告) + `session-start-refresh-installer.sh` (main の install.sh を fetch して差分があれば再 run、Setup script 編集不要にする) | `SKIP_HOOK=1` |
 | 3. **cc-relay clone** | `ippoan/cc-relay` を shallow clone (`--depth 1`)。既存 `.git` があれば skip。`/home/user` がある環境 (CCoW) はそこへ、無ければ `$HOME/cc-relay` | `SKIP_CC_RELAY=1` |
 | 4. **cc-relay MCP server 登録** | `~/.claude.json` の `mcpServers["cc-relay"]` に `https://mcp.ippoan.org/mcp` (prod) を merge。既存 key は保持 | `SKIP_MCP=1` |
 
@@ -138,6 +156,45 @@ hook 内部処理:
 5. proxy URL を見つけられない / clone 失敗時は fail-open (additionalContext にエラー記録、session は継続)
 
 PAT も INTERNAL_SHARED_SECRET も CCoW env vars 追加も不要。CCoW の network allowlist にも変更不要 (127.0.0.1 のみ叩く)。
+
+### Auto-refresh hook (`session-start-refresh-installer.sh`)
+
+**Setup script は 1 回 paste したら以降編集不要** を実現する hook。毎 session 起動時に `$CLAUDE_MD_INSTALL_URL` (default: main raw URL) から install.sh を fetch、sha256 を `~/.claude/.refresh-installer-marker` と比較し、変わっていたら再 run する。
+
+| 動作 | 条件 |
+|---|---|
+| fetch + 再 run | marker と sha が違う |
+| fetch のみ、再 run skip | sha 一致(marker mtime を bump して TTL 延長) |
+| 全 skip | marker が `CLAUDE_REFRESH_TTL` (default 300s) 以内 |
+| fail-open | curl 失敗・sha 計算失敗時は warning 出して継続 |
+
+env override:
+
+| 変数 | 既定値 | 用途 |
+|---|---|---|
+| `CLAUDE_MD_INSTALL_URL` | `https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh` | refresh hook が fetch する install.sh URL。Pinned release を使う場合は `releases/download/<tag>/install.sh` を指す |
+| `CLAUDE_REFRESH_MARKER` | `$CLAUDE_HOME/.refresh-installer-marker` | 最後に install した install.sh の sha256 を保存 |
+| `CLAUDE_REFRESH_TTL` | `300` | network check skip TTL (秒) |
+
+#### ⚠️ 1 session 遅延する変更
+
+Claude Code は session 起動時に `~/.claude/settings.json` と `~/.claude.json` を読んでメモリに hold するため、これらの内容変更は **当該 session には反映されない**。refresh hook は disk を更新するが、Claude Code は再 read しない。
+
+| 変更 | 反映 |
+|---|---|
+| `permissions.allow/deny/ask` 追加 | 次 session |
+| `hooks.<event>` 追加(新規 hook 登録) | 次 session |
+| `~/.claude.json` `mcpServers` 追加 | 次 session |
+| 既存 `hooks/*.sh` の中身修正 | 即時(hook 発火時に disk read) |
+| skills / sources / cc-relay clone の更新 | 即時 |
+
+→ permissions / mcpServers / 新規 hook 登録を即時反映したい場合のみ Setup script 欄に `# bust YYYYMMDD-HHMMSS` 等を追加して保存し直す。それ以外の変更は何もしない。
+
+参考:
+- [`anthropics/claude-code` #30737](https://github.com/anthropics/claude-code/issues/30737) — Allow reloading permissions/settings in a running session
+- [`anthropics/claude-code` #5513](https://github.com/anthropics/claude-code/issues/5513) — `/reloadSettings` feature request
+- [`anthropics/claude-code` #33829](https://github.com/anthropics/claude-code/issues/33829) — Hot-reload permissions from settings.local.json
+- [Claude Code on the web — Setup script cache](https://code.claude.com/docs/en/claude-code-on-the-web#environment-caching)
 
 ### Drift 警告 hook (`session-start-snapshot.sh` + `pre-tool-claude-dir-drift.sh`)
 

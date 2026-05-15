@@ -72,6 +72,11 @@
             "type": "command",
             "command": "/root/.claude/hooks/session-start-snapshot.sh",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "/root/.claude/hooks/session-start-refresh-installer.sh",
+            "timeout": 60
           }
         ]
       }

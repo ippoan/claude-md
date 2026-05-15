@@ -4,9 +4,11 @@
 # 4 段階で user-level セットアップを行う (各段階は env で個別 skip 可能):
 #
 #   1. ~/.claude/settings.json                          (claude-md の template, SessionStart + PreToolUse hook 登録済)
-#   2. ~/.claude/hooks/*.sh                             (session-start-install-hooks / session-start-snapshot / pre-tool-claude-dir-drift)
+#   2. ~/.claude/hooks/*.sh                             (install-hooks / snapshot / drift / refresh-installer)
 #   3. cc-relay shallow clone                           (ippoan/cc-relay)
 #   4. cc-relay MCP server を user-level ~/.claude.json に登録
+#   5. ~/.claude/.install-stamp                         (検証用 epoch+ISO+version+hooks)
+#   6. ~/.claude/.refresh-installer-marker              (refresh hook が使う sha)
 #
 # skills/hooks 自体の clone は SessionStart hook が CCoW の per-session git proxy
 # 経由で行う (= PAT/INTERNAL_SHARED_SECRET 不要、private repo にも access 可能)。
@@ -38,6 +40,12 @@
 #   CLAUDE_INSTALL_STAMP     stamp ファイル path (default: $CLAUDE_HOME/.install-stamp)
 #                            このファイルの mtime と中身で「今 session で install.sh が
 #                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
+#   CLAUDE_MD_INSTALL_URL    session-start-refresh-installer.sh が fetch する
+#                            install.sh URL (default: main raw)。Pinned release を
+#                            常用する場合は release asset URL を指す
+#   CLAUDE_REFRESH_MARKER    refresh marker path
+#                            (default: $CLAUDE_HOME/.refresh-installer-marker)
+#   CLAUDE_REFRESH_TTL       refresh hook の network check skip TTL 秒 (default: 300)
 set -eu
 
 # Version stamp — rewritten on every push to main by
@@ -58,6 +66,7 @@ HOOK_SCRIPTS=(
   "session-start-install-hooks.sh"
   "session-start-snapshot.sh"
   "pre-tool-claude-dir-drift.sh"
+  "session-start-refresh-installer.sh"
 )
 LEGACY_HOOK_URL="${CLAUDE_HOOK_URL:-}"
 CLAUDE_JSON_DEST="${CLAUDE_JSON_DEST:-/root/.claude.json}"
@@ -159,3 +168,15 @@ install_sh_version=$INSTALL_SH_VERSION
 hooks_installed=$([ "${SKIP_HOOK:-0}" = "1" ] && echo "skipped" || printf '%s,' "${HOOK_SCRIPTS[@]}" | sed 's/,$//')
 STAMP
 log "stamp: $STAMP_DEST ($STAMP_NOW_ISO, version=$INSTALL_SH_VERSION)"
+
+# --- 6. Refresh marker (consumed by session-start-refresh-installer.sh) ---
+# Record sha256 of *the same install.sh content that just ran* so the
+# SessionStart refresh hook can detect when main has moved forward.
+# Re-fetch from the URL because $0 is "bash" when curl|bash'd.
+REFRESH_MARKER="${CLAUDE_REFRESH_MARKER:-$CLAUDE_HOME/.refresh-installer-marker}"
+REFRESH_URL="${CLAUDE_MD_INSTALL_URL:-$CLAUDE_MD_BASE_URL/.claude/install.sh}"
+self_sha=$(curl -fsSL --max-time 15 "$REFRESH_URL" 2>/dev/null | sha256sum 2>/dev/null | awk '{print $1}' || true)
+if [ -n "${self_sha:-}" ]; then
+  echo "$self_sha" > "$REFRESH_MARKER"
+  log "refresh-marker: $REFRESH_MARKER (sha ${self_sha:0:12})"
+fi
