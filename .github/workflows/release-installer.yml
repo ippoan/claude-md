@@ -18,6 +18,12 @@ on:
       - .claude/install.sh
       - .claude/hooks/**
       - .claude/settings.json.template
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why are you manually triggering this release?"
+        required: false
+        default: "manual"
 
 permissions:
   contents: write
