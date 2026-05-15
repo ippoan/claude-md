@@ -26,8 +26,6 @@
 # env override:
 #   CLAUDE_HOME              ~/.claude path (default: $HOME/.claude)
 #   CLAUDE_MD_INSTALL_URL    install.sh URL (default: main raw URL)
-#                            Pinned release を使うなら
-#                            https://github.com/ippoan/claude-md/releases/download/<tag>/install.sh
 #   CLAUDE_REFRESH_MARKER    last-installed sha marker path
 #                            (default: $CLAUDE_HOME/.refresh-installer-marker)
 #   CLAUDE_REFRESH_TTL       network check skip TTL 秒 (default: 300 = 5 min)
