@@ -123,8 +123,9 @@ PAT も INTERNAL_SHARED_SECRET も CCoW env vars 追加も不要。CCoW の netw
 
 | 変数 | 既定値 | 用途 |
 |---|---|---|
-| `CLAUDE_MD_TEMPLATE_URL` | `…/ippoan/claude-md/main/.claude/settings.json.template` | settings.json template の URL |
-| `CLAUDE_HOOK_URL` | `…/ippoan/claude-md/main/.claude/hooks/session-start-install-hooks.sh` | SessionStart hook script の URL |
+| `CLAUDE_MD_BASE_URL` | `https://raw.githubusercontent.com/ippoan/claude-md/main` | claude-md raw base URL。**branch 切替の単一窓口** (PR テスト用) |
+| `CLAUDE_MD_TEMPLATE_URL` | `$CLAUDE_MD_BASE_URL/.claude/settings.json.template` | settings.json template の URL (個別上書き) |
+| `CLAUDE_HOOK_URL` | `$CLAUDE_MD_BASE_URL/.claude/hooks/session-start-install-hooks.sh` | SessionStart hook script の URL (個別上書き) |
 | `CLAUDE_HOME` | `/root/.claude` | `.claude` dir |
 | `CLAUDE_SETTINGS_DEST` | `$CLAUDE_HOME/settings.json` | settings.json install 先 |
 | `CLAUDE_JSON_DEST` | `/root/.claude.json` | MCP 登録先 |

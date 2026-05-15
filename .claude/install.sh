@@ -19,8 +19,12 @@
 #   bash .claude/install.sh
 #
 # env override (全て optional):
-#   CLAUDE_MD_TEMPLATE_URL   settings.json template の URL
-#   CLAUDE_HOOK_URL          SessionStart hook script の URL
+#   CLAUDE_MD_BASE_URL       claude-md の raw base URL。branch 切替の単一窓口
+#                            (default: https://raw.githubusercontent.com/ippoan/claude-md/main)
+#                            例: PR テスト用に branch を指す場合
+#                              CLAUDE_MD_BASE_URL=https://raw.githubusercontent.com/ippoan/claude-md/claude/readme-setup-script
+#   CLAUDE_MD_TEMPLATE_URL   settings.json template の URL (BASE_URL を上書き)
+#   CLAUDE_HOOK_URL          SessionStart hook script の URL (BASE_URL を上書き)
 #   CLAUDE_HOME              ~/.claude の path (default: /root/.claude)
 #   CLAUDE_SETTINGS_DEST     settings.json の install 先 (default: $CLAUDE_HOME/settings.json)
 #   CLAUDE_JSON_DEST         ~/.claude.json の path (default: /root/.claude.json)
@@ -34,8 +38,9 @@
 set -eu
 
 CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
-TEMPLATE_URL="${CLAUDE_MD_TEMPLATE_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/settings.json.template}"
-HOOK_URL="${CLAUDE_HOOK_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/hooks/session-start-install-hooks.sh}"
+CLAUDE_MD_BASE_URL="${CLAUDE_MD_BASE_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main}"
+TEMPLATE_URL="${CLAUDE_MD_TEMPLATE_URL:-$CLAUDE_MD_BASE_URL/.claude/settings.json.template}"
+HOOK_URL="${CLAUDE_HOOK_URL:-$CLAUDE_MD_BASE_URL/.claude/hooks/session-start-install-hooks.sh}"
 SETTINGS_DEST="${CLAUDE_SETTINGS_DEST:-$CLAUDE_HOME/settings.json}"
 HOOK_DEST="$CLAUDE_HOME/hooks/session-start-install-hooks.sh"
 CLAUDE_JSON_DEST="${CLAUDE_JSON_DEST:-/root/.claude.json}"
