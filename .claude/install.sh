@@ -35,6 +35,9 @@
 #   SKIP_HOOK=1              1 を立てると SessionStart hook script の配置を skip
 #   SKIP_CC_RELAY=1          1 を立てると cc-relay clone を skip
 #   SKIP_MCP=1               1 を立てると MCP 登録を skip
+#   CLAUDE_INSTALL_STAMP     stamp ファイル path (default: $CLAUDE_HOME/.install-stamp)
+#                            このファイルの mtime と中身で「今 session で install.sh が
+#                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
 set -eu
 
 CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
@@ -131,3 +134,23 @@ PY
 fi
 
 log "done"
+
+# --- 5. Install stamp (always written last) ---
+# fresh-env 検証用の epoch + ISO timestamp + script SHA + base URL を
+# $CLAUDE_HOME/.install-stamp に書き出す。次の session で `cat` 1 発で
+# 「setup script で install.sh が走ったか」「いつの版か」を即判定できる。
+# CCoW env cache snapshot に焼き込まれた古い ~/.claude を踏むと
+# このファイルが container 起動より大きく前の mtime を持つ (= cache 由来)。
+STAMP_DEST="${CLAUDE_INSTALL_STAMP:-$CLAUDE_HOME/.install-stamp}"
+STAMP_SHA=$(sha256sum "$0" 2>/dev/null | awk '{print $1}' || echo "unknown")
+STAMP_NOW_EPOCH=$(date +%s)
+STAMP_NOW_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+mkdir -p "$(dirname "$STAMP_DEST")"
+cat > "$STAMP_DEST" <<STAMP
+epoch=$STAMP_NOW_EPOCH
+iso=$STAMP_NOW_ISO
+base_url=$CLAUDE_MD_BASE_URL
+script_sha256=$STAMP_SHA
+hooks_installed=$([ "${SKIP_HOOK:-0}" = "1" ] && echo "skipped" || printf '%s,' "${HOOK_SCRIPTS[@]}" | sed 's/,$//')
+STAMP
+log "stamp: $STAMP_DEST ($STAMP_NOW_ISO)"
