@@ -82,44 +82,54 @@ sed -i 's|<<REPO_NAME>>|cc-relay|g' CLAUDE.md
 で検証する仕組みは未実装 (issue 化 予定)。当面は consumer repo 側 PR レビュー
 で「template の対応セクションと矛盾していないか」を手目視確認する。
 
+## Bootstrap script (`.claude/install.sh`)
+
+Claude Code on the Web の session を立ち上げた直後の user-level セットアップを 1 本に集約した bootstrap script。Setup script 欄 (推奨) または session 冒頭 paste のいずれも下記 1 行で済む:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
+```
+
+### 何が走るか
+
+| 段階 | 内容 | skip env |
+|---|---|---|
+| 1. **settings.json** | `.claude/settings.json.template` を `~/.claude/settings.json` に install (allow list 55 件) | `SKIP_SETTINGS=1` |
+| 2. **claude-hooks chain** | `yhonda-ohishi/claude-hooks/install.sh` を pipe to bash。claude-skills / claude-hooks を `~/.claude/sources/` に clone + skill symlink (claude-hooks 側が idempotent / TTL 1h)。**private repo で 404 等の場合は warn だけ出して continue** | `SKIP_HOOKS=1` |
+| 3. **cc-relay clone** | `ippoan/cc-relay` を shallow clone (`--depth 1`)。既存 `.git` があれば skip。`/home/user` がある環境 (CCoW) はそこへ、無ければ `$HOME/cc-relay` | `SKIP_CC_RELAY=1` |
+| 4. **cc-relay MCP server 登録** | `~/.claude.json` の `mcpServers["cc-relay"]` に `https://mcp.ippoan.org/mcp` (prod) を merge。既存 key は保持 | `SKIP_MCP=1` |
+
+`set -eu` で 1 (必須) は失敗時 Setup script を fail させる。2〜4 は accessibility 失敗時に warn だけ出して継続 (アクセスできないものは黙って skip するのが趣旨)。
+
+### env override
+
+全段階に共通の override:
+
+| 変数 | 既定値 | 用途 |
+|---|---|---|
+| `CLAUDE_MD_TEMPLATE_URL` | `…/ippoan/claude-md/main/.claude/settings.json.template` | settings.json template の URL |
+| `CLAUDE_SETTINGS_DEST` | `/root/.claude/settings.json` | settings.json install 先 |
+| `CLAUDE_JSON_DEST` | `/root/.claude.json` | MCP 登録先 |
+| `CLAUDE_HOOKS_INSTALL_URL` | `…/yhonda-ohishi/claude-hooks/master/install.sh` | claude-hooks installer URL (fork / private mirror に差し替え可) |
+| `CC_RELAY_REPO` | `https://github.com/ippoan/cc-relay.git` | cc-relay clone URL |
+| `CC_RELAY_DIR` | `/home/user/cc-relay` (CCoW) / `$HOME/cc-relay` | cc-relay clone 先 |
+| `CC_RELAY_MCP_URL` | `https://mcp.ippoan.org/mcp` (prod) | user-level MCP server URL。staging 切替: `https://mcp-staging.ippoan.org/mcp` |
+| `SKIP_SETTINGS` / `SKIP_HOOKS` / `SKIP_CC_RELAY` / `SKIP_MCP` | unset | `1` で各段階 skip |
+
+### 運用
+
+- **A. session 冒頭で 1 回 paste** — 1 行 (上記) を冒頭 prompt に貼り付け。書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
+- **B. CCoW environment の Setup script に登録 (推奨)** — Environment → Setup script 欄に同じ 1 行を貼ると container 起動時に 1 回走る。毎 session の paste 不要。詳細は https://code.claude.com/docs/en/claude-code-on-the-web 。
+
+### A/B 共通
+
+- 各段階で `[install.sh] …` プレフィクス付きでログを出すので、Setup script ログ / session の最初の Bash 結果で成否を確認できる。
+- project-level `.claude/settings.json` (repo の中に commit する形) と併用可能。重複は project 側が勝つ。
+- private repo の chain (claude-hooks/claude-skills) はデフォルト URL では anonymous accessibility check に失敗する。fork を public 化するか `CLAUDE_HOOKS_INSTALL_URL` をネットワーク到達可能な mirror に差し替える。
+
 ## Tool 使用許可テンプレート (`.claude/settings.json.template`)
 
-Claude Code on Web の session で頻出するツール許可を 1 枚に集約した user-level template。
-`~/.claude/settings.json` に置けば repo attach に関係なく effective になる (= cross-repo の cc-relay / auth-worker / claude-hooks 系セッションで permission prompt を減らせる)。
-
-### install
-
-2 通りの運用がある。**B が推奨** (毎 session 何もしなくて良い)。
-
-#### A. session 冒頭で 1 回 paste
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
-```
-
-- Claude Code on Web の container は ephemeral なので、新 session ごとに上記 one-liner を冒頭 prompt に貼り付ける運用。
-- 書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
-
-#### B. CCoW environment の Setup script に登録 (推奨)
-
-Claude Code on the Web の environment 設定には **Setup script** 欄があり、
-container 起動時に 1 回だけ実行される。ここに以下 1 行を貼っておけば fresh
-container ごとに自動で `~/.claude/settings.json` が install され、毎 session
-の paste 作業は不要になる。
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
-```
-
-- 実体は [`/.claude/install.sh`](.claude/install.sh) (`mkdir -p` + `curl` + 件数チェックの 4 行程度)。`set -eu` で失敗時に container 起動を止める。
-- template / 取り込み先パスを変えたい場合は `CLAUDE_MD_TEMPLATE_URL` / `CLAUDE_SETTINGS_DEST` env で上書き可。
-- 設定場所: Claude Code on the Web の Environment → Setup script 欄。詳細は https://code.claude.com/docs/en/claude-code-on-the-web 。
-
-#### A/B 共通
-
-- `install.sh` 末尾で `allow=N` を echo するので、Setup script ログでも install 成否を確認できる (現 template は `allow=55`)。
-- project-level `.claude/settings.json` (repo の中に commit する形) と併用可能。重複は project 側が勝つ。
-- template / install.sh 自体を更新した場合、次に新規 container が立ち上がる session から自動で取り込まれる (既存 session には影響しない)。
+bootstrap の段階 1 で install される user-level template。`~/.claude/settings.json` に置けば repo attach に関係なく effective になる (= cross-repo の cc-relay / auth-worker / claude-hooks 系セッションで permission prompt を減らせる)。
 
 ### 中身 (要旨)
 
