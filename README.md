@@ -82,44 +82,74 @@ sed -i 's|<<REPO_NAME>>|cc-relay|g' CLAUDE.md
 で検証する仕組みは未実装 (issue 化 予定)。当面は consumer repo 側 PR レビュー
 で「template の対応セクションと矛盾していないか」を手目視確認する。
 
+## Bootstrap script (`.claude/install.sh`)
+
+Claude Code on the Web の session を立ち上げた直後の user-level セットアップを 1 本に集約した bootstrap script。Setup script 欄 (推奨) または session 冒頭 paste のいずれも下記 1 行で済む:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
+```
+
+### 何が走るか
+
+| 段階 | 内容 | skip env |
+|---|---|---|
+| 1. **settings.json** | `.claude/settings.json.template` を `~/.claude/settings.json` に install (allow list 55 件 + SessionStart hook 登録) | `SKIP_SETTINGS=1` |
+| 2. **SessionStart hook 配置** | `.claude/hooks/session-start-install-hooks.sh` を `~/.claude/hooks/` に配置。**毎 session** で CCoW per-session git proxy 経由で yhonda-ohishi/claude-skills + claude-hooks を `~/.claude/sources/` に sync + skill symlink (詳細は次節) | `SKIP_HOOK=1` |
+| 3. **cc-relay clone** | `ippoan/cc-relay` を shallow clone (`--depth 1`)。既存 `.git` があれば skip。`/home/user` がある環境 (CCoW) はそこへ、無ければ `$HOME/cc-relay` | `SKIP_CC_RELAY=1` |
+| 4. **cc-relay MCP server 登録** | `~/.claude.json` の `mcpServers["cc-relay"]` に `https://mcp.ippoan.org/mcp` (prod) を merge。既存 key は保持 | `SKIP_MCP=1` |
+
+`set -eu` で 1〜2 は失敗時 Setup script を fail させる (curl から claude-md 自身を取れない時点で先に進めても無意味)。3〜4 は accessibility 失敗時に warn だけ出して継続。
+
+### SessionStart hook (`session-start-install-hooks.sh`)
+
+claude-skills / claude-hooks を取得する処理を **SessionStart hook に分離した理由**:
+
+- Setup script 時点では attached repo が clone される前なので、CCoW の git proxy URL (`http://local_proxy@127.0.0.1:<port>/git/…`) を discover できない
+- raw.githubusercontent.com を anonymous で叩いても private repo (yhonda-ohishi/*) は 404 になる
+- SessionStart hook なら毎 session attached repo の `.git/config` から proxy URL を抜き出せる。そして CCoW の scoped credential が yhonda-ohishi/* にも valid
+
+hook 内部処理:
+
+1. `/home/user/*/` を走査して `.git/config` から `http://local_proxy@127.0.0.1:<port>/git` 部分を抽出
+2. その proxy URL を base に `git clone --depth 1 …/yhonda-ohishi/{claude-skills,claude-hooks}` を `~/.claude/sources/` に展開 (既存なら `fetch --depth 1 + reset --hard`)
+3. `~/.claude/sources/claude-skills/<name>/SKILL.md` を `~/.claude/skills/<name>` に symlink (既存の非 symlink = user 手書きは触らない)
+4. TTL (`CLAUDE_HOOKS_INSTALL_TTL`, default 3600s) 内は network sync を skip。symlink 更新だけ実施
+5. proxy URL を見つけられない / clone 失敗時は fail-open (additionalContext にエラー記録、session は継続)
+
+PAT も INTERNAL_SHARED_SECRET も CCoW env vars 追加も不要。CCoW の network allowlist にも変更不要 (127.0.0.1 のみ叩く)。
+
+### env override
+
+| 変数 | 既定値 | 用途 |
+|---|---|---|
+| `CLAUDE_MD_BASE_URL` | `https://raw.githubusercontent.com/ippoan/claude-md/main` | claude-md raw base URL。**branch 切替の単一窓口** (PR テスト用) |
+| `CLAUDE_MD_TEMPLATE_URL` | `$CLAUDE_MD_BASE_URL/.claude/settings.json.template` | settings.json template の URL (個別上書き) |
+| `CLAUDE_HOOK_URL` | `$CLAUDE_MD_BASE_URL/.claude/hooks/session-start-install-hooks.sh` | SessionStart hook script の URL (個別上書き) |
+| `CLAUDE_HOME` | `/root/.claude` | `.claude` dir |
+| `CLAUDE_SETTINGS_DEST` | `$CLAUDE_HOME/settings.json` | settings.json install 先 |
+| `CLAUDE_JSON_DEST` | `/root/.claude.json` | MCP 登録先 |
+| `CC_RELAY_REPO` | `https://github.com/ippoan/cc-relay.git` | cc-relay clone URL |
+| `CC_RELAY_DIR` | `/home/user/cc-relay` (CCoW) / `$HOME/cc-relay` | cc-relay clone 先 |
+| `CC_RELAY_MCP_URL` | `https://mcp.ippoan.org/mcp` (prod) | user-level MCP server URL。staging 切替: `https://mcp-staging.ippoan.org/mcp` |
+| `SKIP_SETTINGS` / `SKIP_HOOK` / `SKIP_CC_RELAY` / `SKIP_MCP` | unset | `1` で各段階 skip |
+| `CLAUDE_HOOKS_INSTALL_TTL` | `3600` | hook 側: network sync を skip する TTL (秒) |
+| `CLAUDE_HOOKS_SCAN_DIRS` | `/home/user` | hook 側: attached repo を探す親 dir |
+
+### 運用
+
+- **A. session 冒頭で 1 回 paste** — 1 行 (上記) を冒頭 prompt に貼り付け。書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
+- **B. CCoW environment の Setup script に登録 (推奨)** — Environment → Setup script 欄に同じ 1 行を貼ると container 起動時に 1 回走る。毎 session の paste 不要。詳細は https://code.claude.com/docs/en/claude-code-on-the-web 。
+
+### A/B 共通
+
+- 各段階で `[install.sh] …` プレフィクス付きでログを出すので、Setup script ログ / session の最初の Bash 結果で成否を確認できる。
+- SessionStart hook の結果は session 起動時の hook log (additionalContext) で確認できる: `install-hooks: synced via proxy (skills=28) ok` 等
+- project-level `.claude/settings.json` (repo の中に commit する形) と併用可能。重複は project 側が勝つ。
+
 ## Tool 使用許可テンプレート (`.claude/settings.json.template`)
 
-Claude Code on Web の session で頻出するツール許可を 1 枚に集約した user-level template。
-`~/.claude/settings.json` に置けば repo attach に関係なく effective になる (= cross-repo の cc-relay / auth-worker / claude-hooks 系セッションで permission prompt を減らせる)。
-
-### install
-
-2 通りの運用がある。**B が推奨** (毎 session 何もしなくて良い)。
-
-#### A. session 冒頭で 1 回 paste
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
-```
-
-- Claude Code on Web の container は ephemeral なので、新 session ごとに上記 one-liner を冒頭 prompt に貼り付ける運用。
-- 書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
-
-#### B. CCoW environment の Setup script に登録 (推奨)
-
-Claude Code on the Web の environment 設定には **Setup script** 欄があり、
-container 起動時に 1 回だけ実行される。ここに以下 1 行を貼っておけば fresh
-container ごとに自動で `~/.claude/settings.json` が install され、毎 session
-の paste 作業は不要になる。
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
-```
-
-- 実体は [`/.claude/install.sh`](.claude/install.sh) (`mkdir -p` + `curl` + 件数チェックの 4 行程度)。`set -eu` で失敗時に container 起動を止める。
-- template / 取り込み先パスを変えたい場合は `CLAUDE_MD_TEMPLATE_URL` / `CLAUDE_SETTINGS_DEST` env で上書き可。
-- 設定場所: Claude Code on the Web の Environment → Setup script 欄。詳細は https://code.claude.com/docs/en/claude-code-on-the-web 。
-
-#### A/B 共通
-
-- `install.sh` 末尾で `allow=N` を echo するので、Setup script ログでも install 成否を確認できる (現 template は `allow=55`)。
-- project-level `.claude/settings.json` (repo の中に commit する形) と併用可能。重複は project 側が勝つ。
-- template / install.sh 自体を更新した場合、次に新規 container が立ち上がる session から自動で取り込まれる (既存 session には影響しない)。
+bootstrap の段階 1 で install される user-level template。`~/.claude/settings.json` に置けば repo attach に関係なく effective になる (= cross-repo の cc-relay / auth-worker / claude-hooks 系セッションで permission prompt を減らせる)。
 
 ### 中身 (要旨)
 
