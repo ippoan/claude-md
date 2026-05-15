@@ -87,16 +87,39 @@ sed -i 's|<<REPO_NAME>>|cc-relay|g' CLAUDE.md
 Claude Code on Web の session で頻出するツール許可を 1 枚に集約した user-level template。
 `~/.claude/settings.json` に置けば repo attach に関係なく effective になる (= cross-repo の cc-relay / auth-worker / claude-hooks 系セッションで permission prompt を減らせる)。
 
-### install (session 冒頭で 1 回 paste)
+### install
+
+2 通りの運用がある。**B が推奨** (毎 session 何もしなくて良い)。
+
+#### A. session 冒頭で 1 回 paste
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/settings.json.template \
-  -o ~/.claude/settings.json
+curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
 ```
 
-- Claude Code on Web の container は ephemeral なので、**新 session ごとに上記 one-liner を冒頭 prompt に貼り付ける**運用。
+- Claude Code on Web の container は ephemeral なので、新 session ごとに上記 one-liner を冒頭 prompt に貼り付ける運用。
 - 書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
+
+#### B. CCoW environment の Setup script に登録 (推奨)
+
+Claude Code on the Web の environment 設定には **Setup script** 欄があり、
+container 起動時に 1 回だけ実行される。ここに以下 1 行を貼っておけば fresh
+container ごとに自動で `~/.claude/settings.json` が install され、毎 session
+の paste 作業は不要になる。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
+```
+
+- 実体は [`/.claude/install.sh`](.claude/install.sh) (`mkdir -p` + `curl` + 件数チェックの 4 行程度)。`set -eu` で失敗時に container 起動を止める。
+- template / 取り込み先パスを変えたい場合は `CLAUDE_MD_TEMPLATE_URL` / `CLAUDE_SETTINGS_DEST` env で上書き可。
+- 設定場所: Claude Code on the Web の Environment → Setup script 欄。詳細は https://code.claude.com/docs/en/claude-code-on-the-web 。
+
+#### A/B 共通
+
+- `install.sh` 末尾で `allow=N` を echo するので、Setup script ログでも install 成否を確認できる (現 template は `allow=55`)。
 - project-level `.claude/settings.json` (repo の中に commit する形) と併用可能。重複は project 側が勝つ。
+- template / install.sh 自体を更新した場合、次に新規 container が立ち上がる session から自動で取り込まれる (既存 session には影響しない)。
 
 ### 中身 (要旨)
 
