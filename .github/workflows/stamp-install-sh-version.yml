@@ -30,26 +30,27 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
 
-      - name: Stamp INSTALL_SH_VERSION with commit SHA
+      - name: Stamp INSTALL_SH_VERSION with timestamp + short SHA
         run: |
           set -eu
-          sha=${GITHUB_SHA}
-          short="${sha:0:12}"
+          short="${GITHUB_SHA:0:7}"
+          ts=$(date -u +%Y.%m.%d-%H%M%S)
+          version="${ts}-${short}"
           file=.claude/install.sh
 
           # Idempotent: replace any existing value, anchored to the literal var name.
-          # Matches both INSTALL_SH_VERSION="dev" and INSTALL_SH_VERSION="<previous sha>".
-          sed -i -E 's|^(INSTALL_SH_VERSION=)"[^"]*"$|\1"'"$sha"'"|' "$file"
+          # Matches INSTALL_SH_VERSION="dev" / "<old SHA>" / "<old timestamp-SHA>".
+          sed -i -E 's|^(INSTALL_SH_VERSION=)"[^"]*"$|\1"'"$version"'"|' "$file"
 
           if git diff --quiet -- "$file"; then
-            echo "no change — install.sh already stamped with $sha"
+            echo "no change — install.sh already stamped with $version"
             exit 0
           fi
 
-          echo "stamped $file with $short"
+          echo "stamped $file with $version"
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$file"
-          git commit -m "chore(install): stamp INSTALL_SH_VERSION=$short [skip ci]"
+          git commit -m "chore(install): stamp INSTALL_SH_VERSION=$version [skip ci]"
           git push

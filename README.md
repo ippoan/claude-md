@@ -84,11 +84,31 @@ sed -i 's|<<REPO_NAME>>|cc-relay|g' CLAUDE.md
 
 ## Bootstrap script (`.claude/install.sh`)
 
-Claude Code on the Web の session を立ち上げた直後の user-level セットアップを 1 本に集約した bootstrap script。Setup script 欄 (推奨) または session 冒頭 paste のいずれも下記 1 行で済む:
+Claude Code on the Web の session を立ち上げた直後の user-level セットアップを 1 本に集約した bootstrap script。
+
+### Setup script に貼る URL — 2 パターン
+
+#### A. **Pinned release (推奨)** — version が `.install-stamp` に焼き込まれる + cache 切り替えが意味付け可能
+
+[最新の installer release](https://github.com/ippoan/claude-md/releases/latest) の tag を埋め込んで:
+
+```sh
+curl -fsSL https://github.com/ippoan/claude-md/releases/download/installer-2026.05.15-085530-eb3f141/install.sh | bash
+```
+
+tag は `installer-YYYY.MM.DD-HHMMSS-<short-SHA>` 形式。新 release を切ったらこの URL の tag 部分を差し替えて Setup script を保存し直すと、CCoW env cache が invalidate され次 session で新 install.sh が走る。release asset の `INSTALL_SH_VERSION` は tag 名そのものなので、`~/.claude/.install-stamp` を見れば deploy 済 version が即わかる。
+
+releases は `.claude/{install.sh,hooks/**,settings.json.template}` のいずれかが main で変わったときに `.github/workflows/release-installer.yml` が自動生成する。
+
+#### B. raw URL — 常に main の最新を取る
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh | bash
 ```
+
+main の最新を fetch。ただし **CCoW env cache** は Setup script 欄の text hash で判定されるため、main 側で install.sh が更新されてもこの URL のままだと cache hit で旧版が install されたままになる。**raw URL を使う場合は `# bust YYYYMMDD-HHMMSS` のような行を追加して保存し直す** ことで cache invalidate を強制する必要がある。
+
+raw URL でも `.github/workflows/stamp-install-sh-version.yml` が main push のたびに `INSTALL_SH_VERSION` を `YYYY.MM.DD-HHMMSS-<short-SHA>` に書き換えるので、`.install-stamp` 上で「いつ deploy された install.sh か」は判別できる。
 
 ### 何が走るか
 
@@ -156,13 +176,15 @@ env override:
 | `CC_RELAY_DIR` | `/home/user/cc-relay` (CCoW) / `$HOME/cc-relay` | cc-relay clone 先 |
 | `CC_RELAY_MCP_URL` | `https://mcp.ippoan.org/mcp` (prod) | user-level MCP server URL。staging 切替: `https://mcp-staging.ippoan.org/mcp` |
 | `SKIP_SETTINGS` / `SKIP_HOOK` / `SKIP_CC_RELAY` / `SKIP_MCP` | unset | `1` で各段階 skip |
+| `CLAUDE_INSTALL_STAMP` | `$CLAUDE_HOME/.install-stamp` | stamp ファイル path。`cat` 1 発で `install_sh_version` と `iso` 時刻を確認でき、setup script で走ったか cache 由来かを判別できる |
 | `CLAUDE_HOOKS_INSTALL_TTL` | `3600` | hook 側: network sync を skip する TTL (秒) |
 | `CLAUDE_HOOKS_SCAN_DIRS` | `/home/user` | hook 側: attached repo を探す親 dir |
 
 ### 運用
 
-- **A. session 冒頭で 1 回 paste** — 1 行 (上記) を冒頭 prompt に貼り付け。書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
-- **B. CCoW environment の Setup script に登録 (推奨)** — Environment → Setup script 欄に同じ 1 行を貼ると container 起動時に 1 回走る。毎 session の paste 不要。詳細は https://code.claude.com/docs/en/claude-code-on-the-web 。
+- **session 冒頭で 1 回 paste** — 1 行 (上記の A or B) を冒頭 prompt に貼り付け。書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
+- **CCoW environment の Setup script に登録 (推奨)** — Environment → Setup script 欄に同じ 1 行を貼ると container 起動時に 1 回走る。毎 session の paste 不要。詳細は https://code.claude.com/docs/en/claude-code-on-the-web 。
+- 更新フロー: Pinned release を使っている場合は新 tag に差し替え + 保存 → 次 session で新 install.sh。raw URL を使っている場合は `# bust YYYYMMDD-HHMMSS` を編集 + 保存 → 次 session で新 install.sh。
 
 ### A/B 共通
 
