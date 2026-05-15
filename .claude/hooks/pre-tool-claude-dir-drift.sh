@@ -53,14 +53,22 @@ esac
 # No snapshot = first session run before snapshot hook landed. Stay silent.
 [ -f "$SNAP" ] || exit 0
 
+# Filter must match session-start-snapshot.sh exactly to avoid spurious diffs
+# from harness runtime artifacts (Bash shell snapshots, harness backups, etc).
 current=$(cd "$CLAUDE_HOME" 2>/dev/null && find . -type f \
   \( -name '*.json' -o -name '*.sh' -o -name '*.md' -o -name '*.toml' \) \
   -not -path './projects/*' \
   -not -path './sources/*' \
   -not -path './cache/*' \
   -not -path './tool-results/*' \
+  -not -path './shell-snapshots/*' \
+  -not -path './backups/*' \
+  -not -path './sessions/*' \
+  -not -path './session-env/*' \
   -not -name '.session-snapshot' \
   -not -name '.install-hooks-marker' \
+  -not -name '.install-stamp' \
+  -not -name '.last-cleanup' \
   2>/dev/null | sort | xargs -r sha256sum 2>/dev/null)
 
 if [ -z "$current" ]; then

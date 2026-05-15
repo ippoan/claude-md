@@ -40,6 +40,12 @@
 #                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
 set -eu
 
+# Version stamp — rewritten on every push to main by
+# .github/workflows/stamp-install-sh-version.yml. "dev" means "running from a
+# branch / locally". CI replaces this with the commit SHA so the .install-stamp
+# file lets fresh-env verification identify exactly which install.sh ran.
+INSTALL_SH_VERSION="dev"
+
 CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
 CLAUDE_MD_BASE_URL="${CLAUDE_MD_BASE_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main}"
 TEMPLATE_URL="${CLAUDE_MD_TEMPLATE_URL:-$CLAUDE_MD_BASE_URL/.claude/settings.json.template}"
@@ -142,7 +148,6 @@ log "done"
 # CCoW env cache snapshot に焼き込まれた古い ~/.claude を踏むと
 # このファイルが container 起動より大きく前の mtime を持つ (= cache 由来)。
 STAMP_DEST="${CLAUDE_INSTALL_STAMP:-$CLAUDE_HOME/.install-stamp}"
-STAMP_SHA=$(sha256sum "$0" 2>/dev/null | awk '{print $1}' || echo "unknown")
 STAMP_NOW_EPOCH=$(date +%s)
 STAMP_NOW_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 mkdir -p "$(dirname "$STAMP_DEST")"
@@ -150,7 +155,7 @@ cat > "$STAMP_DEST" <<STAMP
 epoch=$STAMP_NOW_EPOCH
 iso=$STAMP_NOW_ISO
 base_url=$CLAUDE_MD_BASE_URL
-script_sha256=$STAMP_SHA
+install_sh_version=$INSTALL_SH_VERSION
 hooks_installed=$([ "${SKIP_HOOK:-0}" = "1" ] && echo "skipped" || printf '%s,' "${HOOK_SCRIPTS[@]}" | sed 's/,$//')
 STAMP
-log "stamp: $STAMP_DEST ($STAMP_NOW_ISO)"
+log "stamp: $STAMP_DEST ($STAMP_NOW_ISO, version=$INSTALL_SH_VERSION)"
