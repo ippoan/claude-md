@@ -87,16 +87,43 @@ sed -i 's|<<REPO_NAME>>|cc-relay|g' CLAUDE.md
 Claude Code on Web の session で頻出するツール許可を 1 枚に集約した user-level template。
 `~/.claude/settings.json` に置けば repo attach に関係なく effective になる (= cross-repo の cc-relay / auth-worker / claude-hooks 系セッションで permission prompt を減らせる)。
 
-### install (session 冒頭で 1 回 paste)
+### install
+
+2 通りの運用がある。**B が推奨** (毎 session 何もしなくて良い)。
+
+#### A. session 冒頭で 1 回 paste
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/settings.json.template \
   -o ~/.claude/settings.json
 ```
 
-- Claude Code on Web の container は ephemeral なので、**新 session ごとに上記 one-liner を冒頭 prompt に貼り付ける**運用。
+- Claude Code on Web の container は ephemeral なので、新 session ごとに上記 one-liner を冒頭 prompt に貼り付ける運用。
 - 書き込み直後の tool call から runtime が新 allow list を読む (= 即時反映)。
+
+#### B. CCoW environment の Setup script に登録 (推奨)
+
+Claude Code on the Web の environment 設定には **Setup script** 欄があり、
+container 起動時に 1 回だけ実行される。ここに以下を貼っておけば fresh
+container ごとに自動で `~/.claude/settings.json` が install され、毎 session
+の paste 作業は不要になる。
+
+```sh
+#!/bin/bash
+set -eu
+mkdir -p /root/.claude
+curl -fsSL https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/settings.json.template \
+  -o /root/.claude/settings.json
+```
+
+- CCoW の container は `root` で動くので home は `/root` (≒ `~`)。`~` 展開を避けて絶対パスで書いておくと setup script 実行時のシェル差異に左右されない。
+- template 側を更新した場合、次に新規 container が立ち上がる session から自動で取り込まれる (既存 session には影響しない)。
+- 設定場所: Claude Code on the Web の Environment → Setup script 欄。詳細は https://code.claude.com/docs/en/claude-code-on-the-web 。
+
+#### A/B 共通
+
 - project-level `.claude/settings.json` (repo の中に commit する形) と併用可能。重複は project 側が勝つ。
+- 検証: 適用後 `python3 -c 'import json; print(len(json.load(open("/root/.claude/settings.json"))["permissions"]["allow"]))'` で allow list の件数を確認できる (現 template は 55 件)。
 
 ### 中身 (要旨)
 
