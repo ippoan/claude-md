@@ -16,6 +16,12 @@ on:
     branches: [main]
     paths:
       - .claude/install.sh
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why are you manually triggering this stamp?"
+        required: false
+        default: "manual"
 
 permissions:
   contents: write
