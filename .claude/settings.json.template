@@ -67,6 +67,23 @@
             "type": "command",
             "command": "/root/.claude/hooks/session-start-install-hooks.sh",
             "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "/root/.claude/hooks/session-start-snapshot.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.claude/hooks/pre-tool-claude-dir-drift.sh",
+            "timeout": 10
           }
         ]
       }
