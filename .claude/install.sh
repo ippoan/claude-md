@@ -3,8 +3,8 @@
 #
 # 4 段階で user-level セットアップを行う (各段階は env で個別 skip 可能):
 #
-#   1. ~/.claude/settings.json                          (claude-md の template, SessionStart hook 登録済)
-#   2. ~/.claude/hooks/session-start-install-hooks.sh   (毎 session で skills/hooks を proxy 経由 sync)
+#   1. ~/.claude/settings.json                          (claude-md の template, SessionStart + PreToolUse hook 登録済)
+#   2. ~/.claude/hooks/*.sh                             (session-start-install-hooks / session-start-snapshot / pre-tool-claude-dir-drift)
 #   3. cc-relay shallow clone                           (ippoan/cc-relay)
 #   4. cc-relay MCP server を user-level ~/.claude.json に登録
 #
@@ -40,9 +40,17 @@ set -eu
 CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
 CLAUDE_MD_BASE_URL="${CLAUDE_MD_BASE_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main}"
 TEMPLATE_URL="${CLAUDE_MD_TEMPLATE_URL:-$CLAUDE_MD_BASE_URL/.claude/settings.json.template}"
-HOOK_URL="${CLAUDE_HOOK_URL:-$CLAUDE_MD_BASE_URL/.claude/hooks/session-start-install-hooks.sh}"
 SETTINGS_DEST="${CLAUDE_SETTINGS_DEST:-$CLAUDE_HOME/settings.json}"
-HOOK_DEST="$CLAUDE_HOME/hooks/session-start-install-hooks.sh"
+
+# Hook scripts to install under $CLAUDE_HOME/hooks/. Add new entries here
+# whenever settings.json.template registers another script. CLAUDE_HOOK_URL
+# (legacy) can still override the first one for backwards compatibility.
+HOOK_SCRIPTS=(
+  "session-start-install-hooks.sh"
+  "session-start-snapshot.sh"
+  "pre-tool-claude-dir-drift.sh"
+)
+LEGACY_HOOK_URL="${CLAUDE_HOOK_URL:-}"
 CLAUDE_JSON_DEST="${CLAUDE_JSON_DEST:-/root/.claude.json}"
 CC_RELAY_REPO="${CC_RELAY_REPO:-https://github.com/ippoan/cc-relay.git}"
 if [ -z "${CC_RELAY_DIR:-}" ]; then
@@ -66,14 +74,22 @@ else
   log "settings.json: $SETTINGS_DEST (allow=$ALLOW)"
 fi
 
-# --- 2. SessionStart hook script ---
+# --- 2. Hook scripts (SessionStart + PreToolUse) ---
 if [ "${SKIP_HOOK:-0}" = "1" ]; then
   log "skip: SKIP_HOOK=1"
 else
-  mkdir -p "$(dirname "$HOOK_DEST")"
-  curl -fsSL "$HOOK_URL" -o "$HOOK_DEST"
-  chmod +x "$HOOK_DEST"
-  log "hook: $HOOK_DEST (registered in settings.json template)"
+  mkdir -p "$CLAUDE_HOME/hooks"
+  for name in "${HOOK_SCRIPTS[@]}"; do
+    dest="$CLAUDE_HOME/hooks/$name"
+    if [ "$name" = "session-start-install-hooks.sh" ] && [ -n "$LEGACY_HOOK_URL" ]; then
+      url="$LEGACY_HOOK_URL"
+    else
+      url="$CLAUDE_MD_BASE_URL/.claude/hooks/$name"
+    fi
+    curl -fsSL "$url" -o "$dest"
+    chmod +x "$dest"
+    log "hook: $dest"
+  done
 fi
 
 # --- 3. cc-relay shallow clone ---
