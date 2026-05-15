@@ -56,7 +56,10 @@
       "mcp__github__search_pull_requests",
       "mcp__github__add_issue_comment",
       "mcp__github__subscribe_pr_activity",
-      "mcp__github__unsubscribe_pr_activity"
+      "mcp__github__unsubscribe_pr_activity",
+      "mcp__github__issue_write",
+      "mcp__72d6cc20-9f30-46e2-ac4f-cf3736a87a7f__update_issue",
+      "mcp__72d6cc20-9f30-46e2-ac4f-cf3736a87a7f__close_issue"
     ]
   },
   "hooks": {
