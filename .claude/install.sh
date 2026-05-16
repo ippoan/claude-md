@@ -51,7 +51,7 @@ set -eu
 # .github/workflows/stamp-install-sh-version.yml. "dev" means "running from a
 # branch / locally". CI replaces this with the commit SHA so the .install-stamp
 # file lets fresh-env verification identify exactly which install.sh ran.
-INSTALL_SH_VERSION="2026.05.16-162735-0704d59"
+INSTALL_SH_VERSION="2026.05.16-163932-dde1d07"
 
 CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
 CLAUDE_MD_BASE_URL="${CLAUDE_MD_BASE_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main}"
@@ -84,7 +84,7 @@ LEGACY_HOOK_URL="${CLAUDE_HOOK_URL:-}"
 # Format: "<name>=<sha256>", one per line, sorted by name.
 HOOK_SHAS=$(cat <<'HOOK_SHAS_EOF'
 pre-tool-claude-dir-drift.sh=bdf35f2dfb5dd360c320d84d9f8368dd585a90b4366aa30670c26e7087ccebd0
-session-start-install-hooks.sh=aff6b53719fb3c95f71dec0298ec6740b4cb65448350b4db0034f9c6cca2201e
+session-start-install-hooks.sh=cf6f1e7251ec34cba9f3d823ced5bcfd744a58377269ccc5a3c6c9d4ea9f2212
 session-start-refresh-installer.sh=b81ad4f1e01af703be96a7d9881823e06804b46d085110bcaaf20ae3689658aa
 session-start-snapshot.sh=42ccba0438c8e20fc064c88d2ca63a1c76cdc6c63189bfce4c2b8ebf02392afb
 HOOK_SHAS_EOF
