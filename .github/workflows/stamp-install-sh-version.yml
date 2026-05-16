@@ -1,12 +1,19 @@
 name: stamp install.sh version
 
-# Rewrite the INSTALL_SH_VERSION literal in .claude/install.sh on every push to
-# main, so users running `curl -fsSL .../install.sh | bash` from main always
-# get a stamp pointing to the commit they fetched. This is what
-# `~/.claude/.install-stamp` records as `install_sh_version=`, which makes
-# fresh-env verification (issue #8) trivial: same value across two sessions =
-# same install.sh deployed; different value = install was re-run with a newer
-# version.
+# Rewrite the INSTALL_SH_VERSION literal AND the HOOK_SHAS block in
+# .claude/install.sh on every push to main, so users running
+# `curl -fsSL .../install.sh | bash` from main always get a stamp pointing
+# to the commit they fetched. This is what `~/.claude/.install-stamp`
+# records as `install_sh_version=`, which makes fresh-env verification
+# (issue #8) trivial: same value across two sessions = same install.sh
+# deployed; different value = install was re-run with a newer version.
+#
+# Hook drift detection: paths trigger on .claude/hooks/** too, and the
+# HOOK_SHAS embedded block is recomputed from disk every run. This means
+# any hook content change forces install.sh's sha to change, which
+# session-start-refresh-installer.sh detects and re-runs install.sh.
+# Without this, hook-only PRs (e.g. #16) silently leave cached
+# ~/.claude environments running the old hook.
 #
 # Loop prevention: the workflow conditional skips runs triggered by
 # `github-actions[bot]`, so the stamping commit itself does not retrigger.
@@ -16,6 +23,7 @@ on:
     branches: [main]
     paths:
       - .claude/install.sh
+      - .claude/hooks/**
   workflow_dispatch:
     inputs:
       reason:
@@ -36,7 +44,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
 
-      - name: Stamp INSTALL_SH_VERSION with timestamp + short SHA
+      - name: Refresh HOOK_SHAS block and stamp INSTALL_SH_VERSION
         run: |
           set -eu
           short="${GITHUB_SHA:0:7}"
@@ -44,19 +52,46 @@ jobs:
           version="${ts}-${short}"
           file=.claude/install.sh
 
-          # Idempotent: replace any existing value, anchored to the literal var name.
-          # Matches INSTALL_SH_VERSION="dev" / "<old SHA>" / "<old timestamp-SHA>".
+          # 1. Recompute HOOK_SHAS from current .claude/hooks/*.sh contents.
+          python3 <<'PY'
+          import hashlib, glob, os, re
+
+          file = ".claude/install.sh"
+          hooks = sorted(glob.glob(".claude/hooks/*.sh"))
+          lines = []
+          for h in hooks:
+              with open(h, "rb") as f:
+                  sha = hashlib.sha256(f.read()).hexdigest()
+              lines.append(f"{os.path.basename(h)}={sha}")
+          block = "\n".join(lines)
+
+          with open(file) as f:
+              src = f.read()
+          pat = re.compile(
+              r"(HOOK_SHAS=\$\(cat <<'HOOK_SHAS_EOF'\n).*?(\nHOOK_SHAS_EOF\n\))",
+              re.DOTALL,
+          )
+          if not pat.search(src):
+              raise SystemExit("HOOK_SHAS block not found in install.sh")
+          new = pat.sub(lambda m: m.group(1) + block + m.group(2), src)
+          with open(file, "w") as f:
+              f.write(new)
+          print("HOOK_SHAS block:")
+          print(block)
+          PY
+
+          # 2. Stamp INSTALL_SH_VERSION. Idempotent: replace any existing value.
           sed -i -E 's|^(INSTALL_SH_VERSION=)"[^"]*"$|\1"'"$version"'"|' "$file"
 
           if git diff --quiet -- "$file"; then
-            echo "no change — install.sh already stamped with $version"
+            echo "no change — install.sh already up to date for $version"
             exit 0
           fi
 
-          echo "stamped $file with $version"
+          echo "stamped $file with $version (and refreshed HOOK_SHAS)"
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$file"
-          git commit -m "chore(install): stamp INSTALL_SH_VERSION=$version [skip ci]"
+          git commit -m "chore(install): stamp INSTALL_SH_VERSION=$version + refresh HOOK_SHAS [skip ci]"
           git push

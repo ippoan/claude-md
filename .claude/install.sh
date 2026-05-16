@@ -68,6 +68,28 @@ HOOK_SCRIPTS=(
   "session-start-refresh-installer.sh"
 )
 LEGACY_HOOK_URL="${CLAUDE_HOOK_URL:-}"
+
+# CI-managed: sha256 of each hook file in this repo at the time install.sh
+# was generated. Rewritten by .github/workflows/stamp-install-sh-version.yml
+# on every push to main that touches .claude/install.sh OR .claude/hooks/**.
+#
+# Why this exists: refresh-installer's drift detection compares the sha of
+# install.sh itself. Without embedding hook content here, a hook-only change
+# (e.g. claude-md PR #16 which only edited session-start-install-hooks.sh)
+# leaves install.sh's sha unchanged → refresh-installer concludes "unchanged"
+# → cached ~/.claude environments never pick up the new hook. Embedding the
+# hook shas as data makes install.sh's sha a function of hook content, so
+# any hook change triggers re-install via the existing sha compare.
+#
+# Format: "<name>=<sha256>", one per line, sorted by name.
+HOOK_SHAS=$(cat <<'HOOK_SHAS_EOF'
+pre-tool-claude-dir-drift.sh=bdf35f2dfb5dd360c320d84d9f8368dd585a90b4366aa30670c26e7087ccebd0
+session-start-install-hooks.sh=aff6b53719fb3c95f71dec0298ec6740b4cb65448350b4db0034f9c6cca2201e
+session-start-refresh-installer.sh=b81ad4f1e01af703be96a7d9881823e06804b46d085110bcaaf20ae3689658aa
+session-start-snapshot.sh=42ccba0438c8e20fc064c88d2ca63a1c76cdc6c63189bfce4c2b8ebf02392afb
+HOOK_SHAS_EOF
+)
+
 CLAUDE_JSON_DEST="${CLAUDE_JSON_DEST:-/root/.claude.json}"
 CC_RELAY_REPO="${CC_RELAY_REPO:-https://github.com/ippoan/cc-relay.git}"
 if [ -z "${CC_RELAY_DIR:-}" ]; then
@@ -105,6 +127,19 @@ else
     fi
     curl -fsSL "$url" -o "$dest"
     chmod +x "$dest"
+
+    # Defense in depth: verify downloaded content against CI-stamped sha.
+    # raw.githubusercontent.com can serve stale cached content for ~5min
+    # after a push, and the LEGACY_HOOK_URL override could point anywhere.
+    # Mismatch is logged but does not abort install (best-effort recovery).
+    expected_sha=$(printf '%s\n' "$HOOK_SHAS" | awk -F= -v n="$name" '$1==n{print $2; exit}')
+    if [ -n "$expected_sha" ]; then
+      actual_sha=$(sha256sum "$dest" 2>/dev/null | awk '{print $1}')
+      if [ "$expected_sha" != "$actual_sha" ]; then
+        log "warn: $name sha mismatch (expected ${expected_sha:0:12}, got ${actual_sha:0:12}) — CDN cache may be stale"
+      fi
+    fi
+
     log "hook: $dest"
   done
 fi
