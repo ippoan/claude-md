@@ -1,12 +1,26 @@
 #!/bin/bash
 # SessionStart hook: install yhonda-ohishi/{claude-skills,claude-hooks}
-# via the CCoW per-session git proxy.
+# (via the CCoW per-session git proxy) and anthropics/skills (via the
+# proxy with a github.com fallback) — all symlinked into ~/.claude/skills.
+#
+# Why anthropics/skills is cloned locally:
+#   Claude Code on Web (Cowork) runs in ephemeral containers and does
+#   NOT mount UI-installed Anthropic skills (skill-creator, mcp-builder,
+#   canvas-design, etc.) into the container, even when claude.ai shows
+#   them as installed. See anthropics/claude-code issues #31542, #26254,
+#   #50669. Cloning the public anthropics/skills repo here is the only
+#   reliable way to make those skills available inside each session.
 #
 # CCoW container 内では attached repo が
 #   http://local_proxy@127.0.0.1:<port>/git/<owner>/<repo>
 # 経由で clone されており、この proxy は private repo (yhonda-ohishi/* 含む)
 # にも access 可能なため、attached repo の .git/config から proxy URL を
 # 抜き出して claude-skills / claude-hooks の bootstrap に流用する。
+# 同じ proxy 経由で anthropics/skills (public) も取得する。proxy が
+# 公開 repo を許可しない構成のケースに備え、github.com 直 URL に fallback。
+#
+# Conflict policy: yhonda-ohishi/claude-skills が先に処理され名前衝突で勝つ。
+# anthropics/skills は空きスロットだけを埋める (user override を温存)。
 #
 # 出力: SessionStart hook spec の JSON (additionalContext で結果を inject)
 #
@@ -14,6 +28,9 @@
 #   CLAUDE_HOME              ~/.claude の path (default: $HOME/.claude)
 #   CLAUDE_HOOKS_INSTALL_TTL network sync を skip する TTL 秒 (default: 3600)
 #   CLAUDE_HOOKS_SCAN_DIRS   proxy URL を探す attached repo の親 dir (default: /home/user)
+#   CLAUDE_HOOKS_ANTHROPIC_SKILLS_DIRECT
+#                            anthropics/skills の直 clone URL fallback
+#                            (default: https://github.com/anthropics/skills.git)
 set -u
 
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
@@ -59,38 +76,63 @@ if [ -f "$MARKER" ]; then
 fi
 
 notes=""
+ANTHROPIC_DIRECT_URL="${CLAUDE_HOOKS_ANTHROPIC_SKILLS_DIRECT:-https://github.com/anthropics/skills.git}"
+
 clone_or_pull() {
-  local owner=$1 repo=$2
-  local dest="$SOURCES_DIR/$repo"
+  local owner=$1 repo=$2 dest_name="${3:-$2}" fallback_url="${4:-}"
+  local dest="$SOURCES_DIR/$dest_name"
   local url="$PROXY_BASE/$owner/$repo"
   if [ -d "$dest/.git" ]; then
     if [ "$fresh" = "1" ]; then
       git -C "$dest" remote set-url origin "$url" 2>/dev/null || true
       git -C "$dest" fetch --depth 1 --quiet origin 2>/dev/null \
         && git -C "$dest" reset --hard --quiet '@{u}' 2>/dev/null \
-        || notes="${notes}pull-$repo-failed "
+        || notes="${notes}pull-$dest_name-failed "
     fi
   else
-    git clone --depth 1 --quiet "$url" "$dest" 2>/dev/null \
-      || notes="${notes}clone-$repo-failed "
+    if ! git clone --depth 1 --quiet "$url" "$dest" 2>/dev/null; then
+      if [ -n "$fallback_url" ] && git clone --depth 1 --quiet "$fallback_url" "$dest" 2>/dev/null; then
+        notes="${notes}clone-$dest_name-via-fallback "
+      else
+        notes="${notes}clone-$dest_name-failed "
+      fi
+    fi
   fi
 }
 
 clone_or_pull yhonda-ohishi claude-skills
 clone_or_pull yhonda-ohishi claude-hooks
+clone_or_pull anthropics    skills        anthropic-skills "$ANTHROPIC_DIRECT_URL"
 
 # 3. SKILL.md を symlink (既存の非 symlink = user 手書きは触らない)
+#    Sources are processed in order; yhonda-ohishi/claude-skills owns its
+#    slots (re-linked even if a symlink already exists), anthropics/skills
+#    only fills slots that are still empty.
 skill_count=0
-if [ -d "$SOURCES_DIR/claude-skills" ]; then
+
+# args: <source-dir> <allow-relink: 1|0>
+link_skills_from() {
+  local source_dir=$1 allow_relink=$2
+  [ -d "$source_dir" ] || return 0
   while IFS= read -r skill_md; do
-    name=$(basename "$(dirname "$skill_md")")
+    local name target dir
+    dir="$(dirname "$skill_md")"
+    name="$(basename "$dir")"
     target="$SKILLS_DIR/$name"
-    if [ -L "$target" ] || [ ! -e "$target" ]; then
-      ln -sfn "$(dirname "$skill_md")" "$target" 2>/dev/null \
+    if [ -L "$target" ]; then
+      if [ "$allow_relink" = "1" ]; then
+        ln -sfn "$dir" "$target" 2>/dev/null \
+          && skill_count=$((skill_count + 1))
+      fi
+    elif [ ! -e "$target" ]; then
+      ln -s "$dir" "$target" 2>/dev/null \
         && skill_count=$((skill_count + 1))
     fi
-  done < <(find "$SOURCES_DIR/claude-skills" -name SKILL.md -not -path '*/.git/*' 2>/dev/null)
-fi
+  done < <(find "$source_dir" -name SKILL.md -not -path '*/.git/*' 2>/dev/null)
+}
+
+link_skills_from "$SOURCES_DIR/claude-skills"    1
+link_skills_from "$SOURCES_DIR/anthropic-skills" 0
 
 [ "$fresh" = "1" ] && touch "$MARKER"
 
