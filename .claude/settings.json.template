@@ -80,6 +80,11 @@
             "type": "command",
             "command": "/root/.claude/hooks/session-start-refresh-installer.sh",
             "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "touch ~/.claude/skills/ 2>/dev/null; exit 0",
+            "timeout": 2
           }
         ]
       }
@@ -92,6 +97,17 @@
             "type": "command",
             "command": "/root/.claude/hooks/pre-tool-claude-dir-drift.sh",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "touch ~/.claude/skills/ 2>/dev/null; exit 0",
+            "timeout": 2
           }
         ]
       }
