@@ -23,6 +23,8 @@
 # anthropics/skills は空きスロットだけを埋める (user override を温存)。
 #
 # 出力: SessionStart hook spec の JSON (additionalContext で結果を inject)
+#   1 行目: install-hooks の総数 + status
+#   2 行目: key-skills の名指し ✓/✗ (／ menu に出てるか即判定するため)
 #
 # env override:
 #   CLAUDE_HOME              ~/.claude の path (default: $HOME/.claude)
@@ -31,6 +33,8 @@
 #   CLAUDE_HOOKS_ANTHROPIC_SKILLS_DIRECT
 #                            anthropics/skills の直 clone URL fallback
 #                            (default: https://github.com/anthropics/skills.git)
+#   CLAUDE_HOOKS_KEY_SKILLS  ✓/✗ check 対象 skill 名の space 区切りリスト
+#                            (default: "skill-creator open-multirepo")
 set -u
 
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
@@ -38,6 +42,7 @@ SOURCES_DIR="$CLAUDE_HOME/sources"
 SKILLS_DIR="$CLAUDE_HOME/skills"
 TTL="${CLAUDE_HOOKS_INSTALL_TTL:-3600}"
 SCAN_DIRS="${CLAUDE_HOOKS_SCAN_DIRS:-/home/user}"
+KEY_SKILLS="${CLAUDE_HOOKS_KEY_SKILLS:-skill-creator open-multirepo}"
 MARKER="$CLAUDE_HOME/.install-hooks-marker"
 
 emit() {
@@ -134,10 +139,29 @@ link_skills_from() {
 link_skills_from "$SOURCES_DIR/claude-skills"    1
 link_skills_from "$SOURCES_DIR/anthropic-skills" 0
 
+# 4. Key-skill availability check — name-by-name ✓/✗ so the user can tell
+#    BEFORE opening the / menu whether the expected skills are present.
+#    "Present" = a symlink or directory under SKILLS_DIR with a SKILL.md
+#    inside (matches Claude Code's own discovery rule).
+key_status=""
+missing=0
+for key in $KEY_SKILLS; do
+  if [ -f "$SKILLS_DIR/$key/SKILL.md" ]; then
+    key_status="${key_status}${key} ✓ "
+  else
+    key_status="${key_status}${key} ✗ "
+    missing=$((missing + 1))
+  fi
+done
+key_status="${key_status% }"
+[ "$missing" -gt 0 ] && key_status="$key_status ← / menu reload needed"
+
 [ "$fresh" = "1" ] && touch "$MARKER"
 
 if [ "$fresh" = "1" ]; then
-  emit "install-hooks: synced via proxy (skills=$skill_count) ${notes:-ok}"
+  msg="install-hooks: synced via proxy (skills=$skill_count) ${notes:-ok}"
 else
-  emit "install-hooks: within TTL ${TTL}s (skills=$skill_count, network skipped)"
+  msg="install-hooks: within TTL ${TTL}s (skills=$skill_count, network skipped)"
 fi
+emit "$msg
+key-skills: $key_status"
