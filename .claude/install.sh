@@ -51,7 +51,7 @@ set -eu
 # .github/workflows/stamp-install-sh-version.yml. "dev" means "running from a
 # branch / locally". CI replaces this with the commit SHA so the .install-stamp
 # file lets fresh-env verification identify exactly which install.sh ran.
-INSTALL_SH_VERSION="2026.05.15-093407-cb4c149"
+INSTALL_SH_VERSION="2026.05.16-162735-0704d59"
 
 CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
 CLAUDE_MD_BASE_URL="${CLAUDE_MD_BASE_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main}"
