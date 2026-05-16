@@ -140,7 +140,6 @@ hook 内部処理:
 3. `~/.claude/sources/claude-skills/<name>/SKILL.md` を `~/.claude/skills/<name>` に symlink (既存の非 symlink = user 手書きは触らない)
 4. TTL (`CLAUDE_HOOKS_INSTALL_TTL`, default 3600s) 内は network sync を skip。symlink 更新だけ実施
 5. proxy URL を見つけられない / clone 失敗時は fail-open (additionalContext にエラー記録、session は継続)
-6. **key-skills 検査**: `CLAUDE_HOOKS_KEY_SKILLS` (default `"skill-creator open-multirepo"`) の各 skill について `$SKILLS_DIR/<name>/SKILL.md` の有無を ✓/✗ で additionalContext に出力。✗ がある時は `← / menu reload needed` を付ける (= / メニューを開く前に「今出てる状態か」を判定できる)
 
 PAT も INTERNAL_SHARED_SECRET も CCoW env vars 追加も不要。CCoW の network allowlist にも変更不要 (127.0.0.1 のみ叩く)。
 
@@ -176,24 +175,6 @@ Claude Code は session 起動時に `~/.claude/settings.json` と `~/.claude.js
 | skills / sources / cc-relay clone の更新 | 即時 |
 
 → permissions / mcpServers / 新規 hook 登録を即時反映したい場合のみ Setup script 欄に `# bust YYYYMMDD-HHMMSS` 等を追加して保存し直す。それ以外の変更は何もしない。
-
-#### worked example: hook 単独編集が既存 CCoW env に届くまで
-
-`session-start-install-hooks.sh` だけを編集する PR (例: PR #18 — key-skills ✓/✗ 出力追加) を例に、既存 env がどう新 hook を受け取るかを追う:
-
-1. PR が main へ merge される
-2. GitHub Actions `stamp-install-sh-version.yml` が起動
-3. workflow は変更された hook の新 sha256 を計算
-4. install.sh 内の `HOOK_SHAS=...` ブロックの該当行をその新 sha に書き換えて main へ自動 push (workflow が直接 commit)
-5. **install.sh 自体の sha も書き換えに伴って変わる** ← この点が PR #17 で導入された肝
-6. 既存 CCoW env で次の session が始まる時、`session-start-refresh-installer.sh` が:
-   - `CLAUDE_MD_INSTALL_URL` から新 install.sh を fetch
-   - sha を計算 → `.refresh-installer-marker` の sha と違う → 再実行
-   - install.sh が curl で新 hook を `~/.claude/hooks/` に上書き配置
-   - marker を新 sha で更新
-7. 同じ session 内ですぐ `install-hooks` hook が新版で走る (hook ファイルは hook 発火時に disk から再 read されるため即時)
-
-PR #17 以前は (4) の HOOK_SHAS 機構が無く、hook ファイルだけ変えても install.sh の中身は不変 → sha も不変 → refresh-installer は「変わっていない」と判定 → 既存 env は古い hook を使い続ける、というリグレッションがあった。HOOK_SHAS により hook content が install.sh の sha の関数となり、hook-only 変更でも再配布がトリガーされる。
 
 参考:
 - [`anthropics/claude-code` #30737](https://github.com/anthropics/claude-code/issues/30737) — Allow reloading permissions/settings in a running session
@@ -241,7 +222,6 @@ env override:
 | `CLAUDE_INSTALL_STAMP` | `$CLAUDE_HOME/.install-stamp` | stamp ファイル path。`cat` 1 発で `install_sh_version` と `iso` 時刻を確認でき、setup script で走ったか cache 由来かを判別できる |
 | `CLAUDE_HOOKS_INSTALL_TTL` | `3600` | hook 側: network sync を skip する TTL (秒) |
 | `CLAUDE_HOOKS_SCAN_DIRS` | `/home/user` | hook 側: attached repo を探す親 dir |
-| `CLAUDE_HOOKS_KEY_SKILLS` | `skill-creator open-multirepo` | hook 側: key-skills ✓/✗ check 対象 (space 区切り) |
 
 ### 運用
 
