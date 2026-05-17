@@ -1,0 +1,23 @@
+name: Auto Merge
+
+# Delegate to the shared reusable in ippoan/ci-workflows so policy changes
+# (mergeable check, squash strategy) propagate to all consumer repos.
+#
+# Repo settings prerequisites (configured once in Settings):
+#   - General → Allow auto-merge: ON
+#   - Branches → main protection: none required for this repo because
+#     stamp-install-sh-version.yml needs direct main pushes. Auto-merge
+#     will therefore squash-merge the PR as soon as this workflow runs.
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, reopened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    uses: ippoan/ci-workflows/.github/workflows/auto-merge.yml@main
+    secrets: inherit
