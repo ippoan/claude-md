@@ -123,6 +123,24 @@ read してメモリに hold し、session 中は再 read しない。一方 hoo
 
 PR template (`.github/pull_request_template.md`) で `Refs` を強制する。
 
+### PR 作成後の CI 監視
+
+**PR を作成したら必ず同じ turn で `mcp__github__subscribe_pr_activity` を呼んで
+CI を watch する。** Claude session 側に CI 完了が webhook で届くので、
+green/red を見て次の判断 (merge 待ち / fix push) に進める。
+
+```
+PR 作成 → 直後に subscribe_pr_activity(owner, repo, pullNumber) → ターン終了
+```
+
+- 監視中は CI fail / review comment が `<github-webhook-activity>` で届く
+- user から「CI 確認しといて」「watch しといて」と明示されなくても、
+  PR を新規に作った直後だけは default で subscribe する
+- 不要になったら `unsubscribe_pr_activity` で外す (user が「もういい」と言った時、
+  PR が merge された時、ターンの最終目的が達成された時)
+- `sleep` / `gh run watch` / 手動 polling は禁止 — webhook で起こされる前提で
+  そのターンは終了する
+
 ### Release
 
 タグは `workflow_dispatch` (`.github/workflows/tag-release.yml`) で発行する。
