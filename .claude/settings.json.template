@@ -42,6 +42,7 @@
       "Bash(git config --get:*)",
       "Bash(bash:*)",
       "Bash(ss:*)",
+      "Bash(gh run watch:*)",
       "mcp__github__issue_read",
       "mcp__github__pull_request_read",
       "mcp__github__get_file_contents",
@@ -98,6 +99,18 @@
             "type": "command",
             "command": "/root/.claude/hooks/pre-tool-claude-dir-drift.sh",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|mcp__github__create_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.claude/sources/claude-hooks/post-pr-check.sh",
+            "timeout": 30
           }
         ]
       }
