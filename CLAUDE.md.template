@@ -123,6 +123,23 @@ read してメモリに hold し、session 中は再 read しない。一方 hoo
 
 PR template (`.github/pull_request_template.md`) で `Refs` を強制する。
 
+### PR 作成前にユーザーに確認
+
+実装 / 修正 / リファクタが終わって commit + push まで進めたら、**PR を勝手に
+作らずに必ず user に「PR してよいか」を確認する。** Claude Code harness 側の
+system prompt にも "Do NOT create a pull request unless the user explicitly
+asks for one" と入っているが、user の作業フロー (レビュー件数 / タイミング /
+draft 扱い / 関連 PR との順序) を尊重するため repo 側のルールとしても明文化する。
+
+- ✅ 推奨フロー: branch push 完了 → user に「PR 作る？draft にする？」と尋ねる →
+  user の指示が出てから `mcp__github__create_pull_request` を呼ぶ
+- ❌ 禁止: push と同じターン内で確認なしに PR を作る (たとえ branch 命名・タイトル・
+  body が完全に整っていても)
+- 例外: user が **同じ会話で明示的に** 「PR まで一気に作って」「終わったら PR して」
+  と指示した場合のみ、再確認なしで PR まで進めてよい
+- PR を作った直後の `subscribe_pr_activity` 呼び出しは次節のとおり (PR 作成自体が
+  確認済みであれば、その流れの中で subscribe してターン終了する)
+
 ### PR 作成後の CI 監視
 
 **PR を作成したら必ず同じ turn で `mcp__github__subscribe_pr_activity` を呼んで
