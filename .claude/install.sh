@@ -7,6 +7,7 @@
 #   2. ~/.claude/hooks/*.sh                             (install-hooks / snapshot / drift / refresh-installer)
 #   3. cc-relay shallow clone                           (ippoan/cc-relay)
 #   4. cc-relay MCP server を user-level ~/.claude.json に登録
+#      + (optional) github-mcp-admin entry を $GITHUB_MCP_ADMIN_TOKEN_JSON 経由で登録
 #   5. ~/.claude/.install-stamp                         (検証用 epoch+ISO+version+hooks)
 #   6. ~/.claude/.refresh-installer-marker              (refresh hook が使う sha)
 #
@@ -32,11 +33,23 @@
 #   CLAUDE_JSON_DEST         ~/.claude.json の path (default: /root/.claude.json)
 #   CC_RELAY_REPO            cc-relay の clone URL
 #   CC_RELAY_DIR             cc-relay の clone 先 (default: /home/user/cc-relay, 無ければ $HOME/cc-relay)
-#   CC_RELAY_MCP_URL         user-level に登録する MCP server URL (default: prod)
+#   CC_RELAY_MCP_URL         user-level に登録する cc-relay MCP server URL (default: prod)
+#   GITHUB_MCP_URL_BASE      github-mcp-server-rs relay の base URL (default: https://mcp.ippoan.org)
+#                            staging override: https://mcp-staging.ippoan.org
+#   GITHUB_MCP_ADMIN_TOKEN_JSON
+#                            github-mcp-server-rs `auth --scope mcp.admin` で焼いた
+#                            token cache file (~/.config/github-mcp-server-rs/token-*.json) を
+#                            CCoW env var に貼った値。set されると `github-mcp-admin` MCP entry
+#                            を ~/.claude.json に追加し、Web セッションから branch protection
+#                            tool (set/get/delete_branch_protection) を呼べるようにする。
+#                            unset の場合は既存 cc-relay entry のみ登録 (graceful skip)。
+#                            JSON 例: {"github_login":"alice","binding_jwt":"<JWT>",...}
+#                            binding_jwt 以外の field は無視される (cache file 全体を貼り付け可)。
 #   SKIP_SETTINGS=1          1 を立てると settings.json install を skip
 #   SKIP_HOOK=1              1 を立てると SessionStart hook script の配置を skip
 #   SKIP_CC_RELAY=1          1 を立てると cc-relay clone を skip
-#   SKIP_MCP=1               1 を立てると MCP 登録を skip
+#   SKIP_MCP=1               1 を立てると MCP 登録を skip (cc-relay + github-mcp-admin 両方)
+#   SKIP_GITHUB_MCP_ADMIN=1  1 を立てると GITHUB_MCP_ADMIN_TOKEN_JSON が set でも admin entry を skip
 #   CLAUDE_INSTALL_STAMP     stamp ファイル path (default: $CLAUDE_HOME/.install-stamp)
 #                            このファイルの mtime と中身で「今 session で install.sh が
 #                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
@@ -100,6 +113,8 @@ if [ -z "${CC_RELAY_DIR:-}" ]; then
   fi
 fi
 CC_RELAY_MCP_URL="${CC_RELAY_MCP_URL:-https://mcp.ippoan.org/mcp}"
+GITHUB_MCP_URL_BASE="${GITHUB_MCP_URL_BASE:-https://mcp.ippoan.org}"
+GITHUB_MCP_ADMIN_TOKEN_JSON="${GITHUB_MCP_ADMIN_TOKEN_JSON:-}"
 
 log() { echo "[install.sh] $*"; }
 
@@ -159,26 +174,69 @@ else
   fi
 fi
 
-# --- 4. cc-relay MCP server (user-level ~/.claude.json) ---
+# --- 4. cc-relay MCP server + optional github-mcp-admin (user-level ~/.claude.json) ---
 if [ "${SKIP_MCP:-0}" = "1" ]; then
   log "skip: SKIP_MCP=1"
 else
   mkdir -p "$(dirname "$CLAUDE_JSON_DEST")"
+  # admin entry is opt-in via env var; explicit SKIP override allowed.
+  if [ "${SKIP_GITHUB_MCP_ADMIN:-0}" = "1" ]; then
+    admin_token_for_py=""
+  else
+    admin_token_for_py="$GITHUB_MCP_ADMIN_TOKEN_JSON"
+  fi
+  GITHUB_MCP_ADMIN_TOKEN_JSON="$admin_token_for_py" \
+  GITHUB_MCP_URL_BASE="$GITHUB_MCP_URL_BASE" \
   python3 - "$CLAUDE_JSON_DEST" "$CC_RELAY_MCP_URL" <<'PY'
 import json, os, sys
-path, url = sys.argv[1], sys.argv[2]
+
+path = sys.argv[1]
+cc_relay_url = sys.argv[2]
+admin_token_raw = os.environ.get("GITHUB_MCP_ADMIN_TOKEN_JSON", "")
+admin_url_base = os.environ.get("GITHUB_MCP_URL_BASE", "https://mcp.ippoan.org").rstrip("/")
+
 try:
     with open(path) as f:
         data = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
     data = {}
+
 servers = data.setdefault("mcpServers", {})
-servers["cc-relay"] = {"type": "http", "url": url}
+servers["cc-relay"] = {"type": "http", "url": cc_relay_url}
+
+admin_msg = None
+if admin_token_raw:
+    try:
+        admin = json.loads(admin_token_raw)
+        login = admin.get("github_login") or admin.get("login")
+        jwt = admin.get("binding_jwt") or admin.get("access_token")
+        if not login or not jwt:
+            raise KeyError("github_login and binding_jwt (or access_token) required")
+        servers["github-mcp-admin"] = {
+            "type": "http",
+            "url": f"{admin_url_base}/u/{login}/mcp",
+            "headers": {"Authorization": f"Bearer {jwt}"},
+        }
+        admin_msg = f"registered github-mcp-admin ({admin_url_base}/u/{login}/mcp)"
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        admin_msg = f"warn: GITHUB_MCP_ADMIN_TOKEN_JSON invalid ({e}); admin entry skipped"
+        # leave any pre-existing admin entry alone in this error case — the user
+        # can re-export and re-run, and we don't want to drop a working entry due
+        # to a typo in a one-off override.
+else:
+    # idempotent cleanup: env var unset → drop any stale admin entry from a
+    # previous session. CCoW envs are ephemeral but ~/.claude.json can survive
+    # cache snapshots, so we want "unset env" to mean "no admin endpoint".
+    if servers.pop("github-mcp-admin", None) is not None:
+        admin_msg = "removed stale github-mcp-admin entry (GITHUB_MCP_ADMIN_TOKEN_JSON not set)"
+
 tmp = path + ".tmp"
 with open(tmp, "w") as f:
     json.dump(data, f, indent=2)
 os.replace(tmp, path)
-print(f"[install.sh] MCP: registered cc-relay ({url}) in {path}")
+print(f"[install.sh] MCP: registered cc-relay ({cc_relay_url}) in {path}")
+if admin_msg:
+    print(f"[install.sh] MCP: {admin_msg}")
 PY
 fi
 
