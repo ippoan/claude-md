@@ -10,6 +10,7 @@
 - [`.claude/install.sh`](./.claude/install.sh) — bootstrap 本体 (Setup script から curl される)
 - [`.claude/hooks/`](./.claude/hooks/) — install.sh が `~/.claude/hooks/` に配置する hook scripts 本体
 - [`.claude/settings.json.template`](./.claude/settings.json.template) — install.sh が `~/.claude/settings.json` に展開する template
+- [`.claude/user-memory.md`](./.claude/user-memory.md) — install.sh が `~/.claude/CLAUDE.md` に marker block で merge する locale 指示 ([#26](https://github.com/ippoan/claude-md/issues/26))
 - [`.github/workflows/stamp-install-sh-version.yml`](./.github/workflows/stamp-install-sh-version.yml) — install.sh の `INSTALL_SH_VERSION` と `HOOK_SHAS` を main push の度に自動 rewrite する CI
 
 ## ブランチ運用

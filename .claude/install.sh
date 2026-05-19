@@ -1,15 +1,16 @@
 #!/bin/bash
 # Bootstrap script for Claude Code on the Web sessions.
 #
-# 4 段階で user-level セットアップを行う (各段階は env で個別 skip 可能):
+# 5 段階で user-level セットアップを行う (各段階は env で個別 skip 可能):
 #
 #   1. ~/.claude/settings.json                          (claude-md の template, SessionStart + PreToolUse hook 登録済)
-#   2. ~/.claude/hooks/*.sh                             (install-hooks / snapshot / drift / refresh-installer)
-#   3. cc-relay shallow clone                           (ippoan/cc-relay)
-#   4. cc-relay MCP server を user-level ~/.claude.json に登録
+#   2. ~/.claude/CLAUDE.md                              (user-level memory に locale 指示を marker block で merge)
+#   3. ~/.claude/hooks/*.sh                             (install-hooks / snapshot / drift / refresh-installer)
+#   4. cc-relay shallow clone                           (ippoan/cc-relay)
+#   5. cc-relay MCP server を user-level ~/.claude.json に登録
 #      + (optional) github-mcp-admin entry を $GITHUB_MCP_ADMIN_TOKEN_JSON 経由で登録
-#   5. ~/.claude/.install-stamp                         (検証用 epoch+ISO+version+hooks)
-#   6. ~/.claude/.refresh-installer-marker              (refresh hook が使う sha)
+#   6. ~/.claude/.install-stamp                         (検証用 epoch+ISO+version+hooks)
+#   7. ~/.claude/.refresh-installer-marker              (refresh hook が使う sha)
 #
 # skills/hooks 自体の clone は SessionStart hook が CCoW の per-session git proxy
 # 経由で行う (= PAT/INTERNAL_SHARED_SECRET 不要、private repo にも access 可能)。
@@ -27,6 +28,8 @@
 #                            例: PR テスト用に branch を指す場合
 #                              CLAUDE_MD_BASE_URL=https://raw.githubusercontent.com/ippoan/claude-md/claude/readme-setup-script
 #   CLAUDE_MD_TEMPLATE_URL   settings.json template の URL (BASE_URL を上書き)
+#   CLAUDE_USER_MEMORY_URL   user-memory.md の URL (BASE_URL を上書き)
+#   CLAUDE_USER_MEMORY_DEST  user-level CLAUDE.md の install 先 (default: $CLAUDE_HOME/CLAUDE.md)
 #   CLAUDE_HOOK_URL          SessionStart hook script の URL (BASE_URL を上書き)
 #   CLAUDE_HOME              ~/.claude の path (default: /root/.claude)
 #   CLAUDE_SETTINGS_DEST     settings.json の install 先 (default: $CLAUDE_HOME/settings.json)
@@ -46,6 +49,8 @@
 #                            JSON 例: {"github_login":"alice","binding_jwt":"<JWT>",...}
 #                            binding_jwt 以外の field は無視される (cache file 全体を貼り付け可)。
 #   SKIP_SETTINGS=1          1 を立てると settings.json install を skip
+#   SKIP_USER_MEMORY=1       1 を立てると ~/.claude/CLAUDE.md の locale block install を skip
+#                            (global で英語応答にしたい時はこれを立てる)
 #   SKIP_HOOK=1              1 を立てると SessionStart hook script の配置を skip
 #   SKIP_CC_RELAY=1          1 を立てると cc-relay clone を skip
 #   SKIP_MCP=1               1 を立てると MCP 登録を skip (cc-relay + github-mcp-admin 両方)
@@ -70,6 +75,8 @@ CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
 CLAUDE_MD_BASE_URL="${CLAUDE_MD_BASE_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main}"
 TEMPLATE_URL="${CLAUDE_MD_TEMPLATE_URL:-$CLAUDE_MD_BASE_URL/.claude/settings.json.template}"
 SETTINGS_DEST="${CLAUDE_SETTINGS_DEST:-$CLAUDE_HOME/settings.json}"
+USER_MEMORY_URL="${CLAUDE_USER_MEMORY_URL:-$CLAUDE_MD_BASE_URL/.claude/user-memory.md}"
+USER_MEMORY_DEST="${CLAUDE_USER_MEMORY_DEST:-$CLAUDE_HOME/CLAUDE.md}"
 
 # Hook scripts to install under $CLAUDE_HOME/hooks/. Add new entries here
 # whenever settings.json.template registers another script. CLAUDE_HOOK_URL
@@ -128,7 +135,62 @@ else
   log "settings.json: $SETTINGS_DEST (allow=$ALLOW)"
 fi
 
-# --- 2. Hook scripts (SessionStart + PreToolUse) ---
+# --- 2. user-level CLAUDE.md (locale instruction in marker block) ---
+# settings.json schema には locale / language に相当する key が無いので、
+# 応答言語の default 化は user memory (~/.claude/CLAUDE.md) 経由で行う。
+# marker block 方式 (BEGIN..END) で既存内容を保ったまま idempotent に merge する。
+# project 側 ./CLAUDE.md (project memory) が user memory より優先されるので
+# repo ごとの opt-out はそちらで上書きできる。
+if [ "${SKIP_USER_MEMORY:-0}" = "1" ]; then
+  log "skip: SKIP_USER_MEMORY=1"
+else
+  mkdir -p "$(dirname "$USER_MEMORY_DEST")"
+  USER_MEMORY_TMP=$(mktemp)
+  if curl -fsSL --max-time 15 "$USER_MEMORY_URL" -o "$USER_MEMORY_TMP"; then
+    USER_MEMORY_DEST="$USER_MEMORY_DEST" USER_MEMORY_TMP="$USER_MEMORY_TMP" python3 - <<'PY'
+import os, re
+
+dest = os.environ["USER_MEMORY_DEST"]
+src_path = os.environ["USER_MEMORY_TMP"]
+
+BEGIN = "<!-- BEGIN claude-md user-memory:locale -->"
+END = "<!-- END claude-md user-memory:locale -->"
+
+with open(src_path) as f:
+    template = f.read().strip()
+
+block = f"{BEGIN}\n<!-- Managed by ippoan/claude-md install.sh. Edits inside this block are overwritten on the next session. -->\n{template}\n{END}"
+
+try:
+    with open(dest) as f:
+        existing = f.read()
+except FileNotFoundError:
+    existing = ""
+
+pat = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END), re.DOTALL)
+if pat.search(existing):
+    new = pat.sub(block, existing, count=1)
+else:
+    sep = "" if not existing else ("\n" if existing.endswith("\n") else "\n\n")
+    new = existing + sep + block + "\n"
+
+if new != existing:
+    tmp = dest + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(new)
+    os.replace(tmp, dest)
+    print(f"[install.sh] user-memory: updated {dest} (locale block)")
+else:
+    print(f"[install.sh] user-memory: {dest} already up to date")
+PY
+    rm -f "$USER_MEMORY_TMP"
+  else
+    log "warn: user-memory fetch failed ($USER_MEMORY_URL); skipping"
+    rm -f "$USER_MEMORY_TMP"
+  fi
+fi
+
+# --- 3. Hook scripts (SessionStart + PreToolUse) ---
 if [ "${SKIP_HOOK:-0}" = "1" ]; then
   log "skip: SKIP_HOOK=1"
 else
@@ -159,7 +221,7 @@ else
   done
 fi
 
-# --- 3. cc-relay shallow clone ---
+# --- 4. cc-relay shallow clone ---
 if [ "${SKIP_CC_RELAY:-0}" = "1" ]; then
   log "skip: SKIP_CC_RELAY=1"
 elif [ -d "$CC_RELAY_DIR/.git" ]; then
@@ -174,7 +236,7 @@ else
   fi
 fi
 
-# --- 4. cc-relay MCP server + optional github-mcp-admin (user-level ~/.claude.json) ---
+# --- 5. cc-relay MCP server + optional github-mcp-admin (user-level ~/.claude.json) ---
 if [ "${SKIP_MCP:-0}" = "1" ]; then
   log "skip: SKIP_MCP=1"
 else
@@ -242,7 +304,7 @@ fi
 
 log "done"
 
-# --- 5. Install stamp (always written last) ---
+# --- 6. Install stamp (always written last) ---
 # fresh-env 検証用の epoch + ISO timestamp + script SHA + base URL を
 # $CLAUDE_HOME/.install-stamp に書き出す。次の session で `cat` 1 発で
 # 「setup script で install.sh が走ったか」「いつの版か」を即判定できる。
@@ -261,7 +323,7 @@ hooks_installed=$([ "${SKIP_HOOK:-0}" = "1" ] && echo "skipped" || printf '%s,' 
 STAMP
 log "stamp: $STAMP_DEST ($STAMP_NOW_ISO, version=$INSTALL_SH_VERSION)"
 
-# --- 6. Refresh marker (consumed by session-start-refresh-installer.sh) ---
+# --- 7. Refresh marker (consumed by session-start-refresh-installer.sh) ---
 # Record sha256 of *the same install.sh content that just ran* so the
 # SessionStart refresh hook can detect when main has moved forward.
 # Re-fetch from the URL because $0 is "bash" when curl|bash'd.
