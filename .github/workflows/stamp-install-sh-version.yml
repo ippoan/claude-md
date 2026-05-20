@@ -24,14 +24,20 @@ name: stamp install.sh version
 # changes from PRs #21..#35 unstamped for ~4 days (see issue
 # ippoan/auth-worker#174 follow-up investigation).
 #
-# `workflow_dispatch` is intentionally NOT declared here. Combining it with
-# `push:` makes GitHub's trigger evaluator emit a 0-job phantom failure run
-# (run name = file path, empty jobs array) for every push that does not
-# match the `branches: [main]` filter — i.e. every `claude/*` topic branch
-# push. See actions/runner#4001. Manual stamping is exposed via the
-# companion workflow `stamp-install-sh-version-manual.yml` (workflow_dispatch
-# only), which keeps the manual entry-point but isolates it from push
-# evaluation.
+# `workflow_dispatch` is intentionally NOT declared anywhere in this repo.
+# Any workflow file containing a `workflow_dispatch:` trigger — even in a
+# separate file with no `push:` trigger of its own — causes GitHub's
+# registration-stage evaluator to record a 0-job phantom failure run
+# (run name = workflow file path, empty jobs array, duration 0s) on every
+# push to a branch that does not satisfy this workflow's `branches:` /
+# `paths:` filter. See actions/runner#4001. PR #40 attempted to preserve
+# the manual entry-point in a companion `*-manual.yml` file but the
+# phantom still appeared, confirming the bug is repo-scoped to the
+# presence of `workflow_dispatch:` itself, not to its co-location with
+# `push:`. If a one-off re-stamp is ever needed, push an empty commit to
+# main touching this workflow's path filter (e.g. `touch .claude/install.sh`
+# + commit + push), or temporarily reintroduce `workflow_dispatch:` for
+# the single use and remove it afterwards.
 
 on:
   push:
