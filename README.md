@@ -265,7 +265,16 @@ env override:
 | `CC_RELAY_REPO` | `https://github.com/ippoan/cc-relay.git` | cc-relay clone URL |
 | `CC_RELAY_DIR` | `/home/user/cc-relay` (CCoW) / `$HOME/cc-relay` | cc-relay clone 先 |
 | `CC_RELAY_MCP_URL` | `https://mcp.ippoan.org/mcp` (prod) | user-level MCP server URL。staging 切替: `https://mcp-staging.ippoan.org/mcp` |
+| `GITHUB_MCP_URL_BASE` | `https://mcp.ippoan.org` | github-mcp-server-rs relay の base URL (admin 用)。staging override: `https://mcp-staging.ippoan.org` |
+| `GITHUB_MCP_ADMIN_TOKEN_JSON` | unset | `auth --scope mcp.admin` で焼いた token cache JSON。set すると `github-mcp-admin` MCP entry を `~/.claude.json` に追加 |
+| `GITHUB_LOGIN` | unset | ippoan/mcp-relay-rs binaries (github-mcp-server-rs + ref-files-mcp-server-rs) を register する際の URL に埋め込む github username。CCoW Setup-script secret として export 推奨 |
+| `MCP_RELAY_URL_BASE` | `$GITHUB_MCP_URL_BASE` | mcp-relay-rs binaries の relay base URL。staging 切替: `https://mcp-staging.ippoan.org` |
+| `GITHUB_MCP_TOKEN_JSON` | unset | mcp-relay 登録時の `github-mcp-server-rs` entry に `Authorization: Bearer` header を埋め込む token cache JSON (silent bootstrap)。同名 env を install-mcp.sh hook が binary 側 token cache hydrate にも使う |
+| `REF_FILES_MCP_TOKEN_JSON` | unset | 同上、`ref-files-mcp-server-rs` 用 |
 | `SKIP_SETTINGS` / `SKIP_USER_MEMORY` / `SKIP_HOOK` / `SKIP_CC_RELAY` / `SKIP_MCP` | unset | `1` で各段階 skip |
+| `SKIP_GITHUB_MCP_ADMIN` / `SKIP_MCP_RELAY` | unset | `1` で個別 MCP entry を skip (URL register のみ skip。SKIP_MCP=1 だと全部 skip) |
+| `CLAUDE_HOOKS_MCP_RELAY_BRANCH` | `main` | session-start-install-mcp-relay.sh が install-mcp(-ref-files).sh を fetch する ippoan/mcp-relay-rs branch |
+| `SKIP_INSTALL_MCP_RELAY` | unset | `1` で session-start-install-mcp-relay.sh hook 全体を skip (URL register は別軸) |
 | `CLAUDE_INSTALL_STAMP` | `$CLAUDE_HOME/.install-stamp` | stamp ファイル path。`cat` 1 発で `install_sh_version` と `iso` 時刻を確認でき、setup script で走ったか cache 由来かを判別できる |
 | `CLAUDE_HOOKS_INSTALL_TTL` | `3600` | hook 側: network sync を skip する TTL (秒) |
 | `CLAUDE_HOOKS_SCAN_DIRS` | `/home/user` | hook 側: attached repo を探す親 dir |
