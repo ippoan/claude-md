@@ -51,7 +51,13 @@ permissions:
 
 jobs:
   stamp:
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore(install): stamp INSTALL_SH_VERSION=') }}
+    # Quoted because the unquoted form let YAML parsers treat the `:` inside
+    # the single-quoted commit-message prefix as a mapping separator. That
+    # made GitHub's registration-stage evaluator emit a 0-job phantom failure
+    # run (run name = workflow file path, jobs empty, duration 0s) on every
+    # push event — independent of branch / paths filter. PRs #40 and #41
+    # mis-diagnosed the symptom as actions/runner#4001 (`workflow_dispatch`).
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore(install): stamp INSTALL_SH_VERSION=') }}"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
