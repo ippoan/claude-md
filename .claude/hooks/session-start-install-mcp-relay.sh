@@ -176,11 +176,14 @@ if [ -z "${GITHUB_LOGIN:-}" ] \
        body:  \"oat-binding: $oat_hash $nonce\"
      → response から comment id を取得 (例: comment.id=123456)
 
-  2. 取得した comment id で auth-worker register endpoint を叩く:
+  2. 取得した comment id で auth-worker register endpoint を叩く
+     (Bearer OAT を付けると issue #176 の org_uuid binding も同時に作成され、
+      次 fresh container は新 OAT でも silent bootstrap される — 推奨):
        curl -sS -X POST '$register_url' \\
+         -H \"Authorization: Bearer \$(cat /home/claude/.claude/remote/.oauth_token)\" \\
          -H 'Content-Type: application/json' \\
          -d '{\"comment_url\":\"https://api.github.com/repos/$TRACK_REPO/issues/comments/<id>\",\"oat_hash\":\"$oat_hash\",\"nonce\":\"$nonce\"}'
-     → 200 { github_login, bound: true } を期待
+     → 200 { github_login, bound: true, org_uuid_bound: true } を期待
 
   3. 再度 grant-via-oat を叩いて binding_jwt を取得・token cache に焼く:
        for aud in github-mcp-server-rs ref-files-mcp-server-rs; do
