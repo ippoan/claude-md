@@ -73,6 +73,13 @@
 #   SKIP_GITHUB_MCP_ADMIN=1  1 を立てると GITHUB_MCP_ADMIN_TOKEN_JSON が set でも admin entry を skip
 #   SKIP_MCP_RELAY=1         1 を立てると GITHUB_LOGIN が set でも github-mcp-server-rs +
 #                            ref-files-mcp-server-rs entry を skip
+#   AUTH_WORKER_ORIGIN       OAT-based silent bootstrap (issue ippoan/auth-worker#174)
+#                            で叩く auth-worker origin
+#                            (default: https://auth-staging.ippoan.org)
+#                            prod 切替: https://auth.ippoan.org
+#   SKIP_OAT_BINDING=1       OAT-based bootstrap (`/mcp/pair/grant-via-oat`) を skip。
+#                            legacy env (GITHUB_LOGIN + GITHUB_MCP_TOKEN_JSON 等)
+#                            のみで mcpServers を登録する path に lock する
 #   CLAUDE_INSTALL_STAMP     stamp ファイル path (default: $CLAUDE_HOME/.install-stamp)
 #                            このファイルの mtime と中身で「今 session で install.sh が
 #                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
@@ -280,12 +287,91 @@ else
   else
     mcp_relay_login_for_py="$GITHUB_LOGIN"
   fi
+  github_mcp_token_for_py="$GITHUB_MCP_TOKEN_JSON"
+  ref_files_mcp_token_for_py="$REF_FILES_MCP_TOKEN_JSON"
+  mcp_relay_url_base_for_py="$MCP_RELAY_URL_BASE"
+
+  # ── OAT-based silent bootstrap (issue ippoan/auth-worker#174) ─────────
+  # GITHUB_LOGIN / token JSON env が無くても、CCoW container 内の Anthropic OAT
+  # (`/home/claude/.claude/remote/.oauth_token`) を identity proof として
+  # auth-worker `/mcp/pair/grant-via-oat` を叩けば、KV bind 済み (= 2 回目以降
+  # の container) は silent に binding_jwt + github_login を取れる。これにより
+  # 本 install.sh が `~/.claude.json` mcpServers に entries を登録できるよう
+  # になり、Claude Code が session 起動時から `github-mcp-server-rs` /
+  # `ref-files-mcp-server-rs` を deferred tool として認識する。
+  #
+  # 未 bind (= 初回 container) は grant-via-oat が 404 を返すので silent skip。
+  # session-start-install-mcp-relay.sh hook が register orchestration を
+  # Claude に要請、bind 後の container で本 block が 200 path に乗る。
+  if [ "${SKIP_MCP_RELAY:-0}" != "1" ] \
+    && [ "${SKIP_OAT_BINDING:-0}" != "1" ] \
+    && [ -z "$mcp_relay_login_for_py" ] \
+    && [ -z "$github_mcp_token_for_py" ] \
+    && [ -z "$ref_files_mcp_token_for_py" ] \
+    && [ -r "/home/claude/.claude/remote/.oauth_token" ]; then
+    oat=$(tr -d '[:space:]' < /home/claude/.claude/remote/.oauth_token)
+    if [ -n "$oat" ]; then
+      auth_origin="${AUTH_WORKER_ORIGIN:-https://auth-staging.ippoan.org}"
+      env_name_github="${GITHUB_MCP_ENV:-staging}"
+      env_name_ref="${REF_FILES_MCP_ENV:-staging}"
+      cache_github="$HOME/.config/github-mcp-server-rs/token-${env_name_github}.json"
+      cache_ref="$HOME/.config/ref-files-mcp-server-rs/token-${env_name_ref}.json"
+
+      # Curl grant-via-oat for one aud, on 200 print JSON to stdout + side-effect
+      # cache file。失敗時は stderr に http_code を log + stdout は空。
+      oat_grant() {
+        local aud="$1" cache="$2"
+        local tmp http_code
+        tmp=$(mktemp)
+        http_code=$(curl -sS -o "$tmp" -w "%{http_code}" --max-time 10 \
+          -X POST "${auth_origin}/mcp/pair/grant-via-oat" \
+          -H "Authorization: Bearer $oat" \
+          -H "Content-Type: application/json" \
+          -d "{\"aud\":\"${aud}\",\"scope\":\"mcp.read mcp.write\"}" \
+          2>/dev/null || echo "000")
+        if [ "$http_code" = "200" ]; then
+          mkdir -p "$(dirname "$cache")"
+          cp "$tmp" "$cache"
+          chmod 600 "$cache"
+          cat "$tmp"
+          rm -f "$tmp"
+          return 0
+        fi
+        log "MCP: OAT grant-via-oat($aud) status=$http_code (will fall through to hook)"
+        rm -f "$tmp"
+        return 1
+      }
+
+      github_json=$(oat_grant "github-mcp-server-rs" "$cache_github") || github_json=""
+      ref_json=$(oat_grant "ref-files-mcp-server-rs" "$cache_ref") || ref_json=""
+      if [ -n "$github_json" ]; then
+        github_mcp_token_for_py="$github_json"
+        # github_login + mcp_url base は両 aud の response で同じ。github 側から拾う。
+        mcp_relay_login_for_py=$(printf '%s' "$github_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("github_login",""))' 2>/dev/null || echo "")
+        if [ -z "$mcp_relay_url_base_for_py" ]; then
+          # auth(-staging).ippoan.org → mcp(-staging).ippoan.org に変換。
+          # grant response の `mcp_url` を直接 parse してもよいが、auth_origin が
+          # 既に唯一の入力なので単純 host 書換で確定する。
+          mcp_relay_url_base_for_py=$(printf '%s' "$auth_origin" | sed 's|//auth|//mcp|')
+        fi
+        log "MCP: OAT-bound, github_login=$mcp_relay_login_for_py (issue ippoan/auth-worker#174)"
+      fi
+      if [ -n "$ref_json" ]; then
+        ref_files_mcp_token_for_py="$ref_json"
+      fi
+    fi
+  fi
+
+  # mcp_relay_url_base_for_py が空のまま python に渡ると default
+  # ($GITHUB_MCP_URL_BASE = https://mcp.ippoan.org prod) になる。
+  : "${mcp_relay_url_base_for_py:=$MCP_RELAY_URL_BASE}"
+
   GITHUB_MCP_ADMIN_TOKEN_JSON="$admin_token_for_py" \
   GITHUB_MCP_URL_BASE="$GITHUB_MCP_URL_BASE" \
   MCP_RELAY_LOGIN="$mcp_relay_login_for_py" \
-  MCP_RELAY_URL_BASE="$MCP_RELAY_URL_BASE" \
-  GITHUB_MCP_TOKEN_JSON="$GITHUB_MCP_TOKEN_JSON" \
-  REF_FILES_MCP_TOKEN_JSON="$REF_FILES_MCP_TOKEN_JSON" \
+  MCP_RELAY_URL_BASE="$mcp_relay_url_base_for_py" \
+  GITHUB_MCP_TOKEN_JSON="$github_mcp_token_for_py" \
+  REF_FILES_MCP_TOKEN_JSON="$ref_files_mcp_token_for_py" \
   python3 - "$CLAUDE_JSON_DEST" "$CC_RELAY_MCP_URL" <<'PY'
 import json, os, sys
 
