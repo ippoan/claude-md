@@ -104,6 +104,15 @@ if [ "${SKIP_OAT_BINDING:-0}" != "1" ] && [ -r "$OAT_FILE" ]; then
     grant_one() {
       local aud="$1" cache="$2" label="$3"
       if [ -s "$cache" ]; then
+        # 既存 cache から github_login を読んで downstream に伝える
+        # (install.sh が OAT path で焼いた直後 hook が走るケース、または
+        # 前 session の cache が container に残っているケース)。これが無いと
+        # GITHUB_LOGIN unset 判定で hook が skip emit してしまう。
+        local login
+        login=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("github_login",""))' "$cache" 2>/dev/null || echo "")
+        if [ -n "$login" ] && [ -z "$oat_grant_login" ]; then
+          oat_grant_login="$login"
+        fi
         oat_msg="$oat_msg ${label}:cache-exists"
         return 0
       fi
@@ -209,7 +218,12 @@ if [ -z "${GITHUB_LOGIN:-}" ] \
     emit "$ctx"
     exit 0
   fi
-  emit "install-mcp-relay: GITHUB_LOGIN and token caches all unset — skipped${oat_msg}"
+  # diagnostic: なぜ skip path に来たか分かるよう各 input の有無を出す
+  diag=""
+  [ -f "$TOKEN_CACHE_GITHUB" ] && diag="${diag} github-cache=present" || diag="${diag} github-cache=absent"
+  [ -f "$TOKEN_CACHE_REF_FILES" ] && diag="${diag} ref-files-cache=present" || diag="${diag} ref-files-cache=absent"
+  [ -r "$OAT_FILE" ] && diag="${diag} oat=readable" || diag="${diag} oat=absent"
+  emit "install-mcp-relay: GITHUB_LOGIN and token caches all unset — skipped${oat_msg} [${diag# }]"
   exit 0
 fi
 

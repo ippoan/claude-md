@@ -290,6 +290,11 @@ else
   github_mcp_token_for_py="$GITHUB_MCP_TOKEN_JSON"
   ref_files_mcp_token_for_py="$REF_FILES_MCP_TOKEN_JSON"
   mcp_relay_url_base_for_py="$MCP_RELAY_URL_BASE"
+  # OAT path で grant response の `mcp_url` 完全 URL が取れたらそれを優先する。
+  # `mcp_relay_url_base_for_py` (= MCP_RELAY_URL_BASE default = GITHUB_MCP_URL_BASE
+  # = prod mcp.ippoan.org) が先に入る現行 logic では staging で発行された
+  # binding_jwt を prod URL に attach する不整合が出るのを避ける。
+  mcp_relay_url_for_py=""
 
   # ── OAT-based silent bootstrap (issue ippoan/auth-worker#174) ─────────
   # GITHUB_LOGIN / token JSON env が無くても、CCoW container 内の Anthropic OAT
@@ -346,15 +351,12 @@ else
       ref_json=$(oat_grant "ref-files-mcp-server-rs" "$cache_ref") || ref_json=""
       if [ -n "$github_json" ]; then
         github_mcp_token_for_py="$github_json"
-        # github_login + mcp_url base は両 aud の response で同じ。github 側から拾う。
+        # github_login + mcp_url は両 aud の response で同じ entry を指す
+        # (= auth-worker は env で staging/prod を切り替えて完全 URL を返す)。
+        # github 側 response から両方とも拾う。
         mcp_relay_login_for_py=$(printf '%s' "$github_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("github_login",""))' 2>/dev/null || echo "")
-        if [ -z "$mcp_relay_url_base_for_py" ]; then
-          # auth(-staging).ippoan.org → mcp(-staging).ippoan.org に変換。
-          # grant response の `mcp_url` を直接 parse してもよいが、auth_origin が
-          # 既に唯一の入力なので単純 host 書換で確定する。
-          mcp_relay_url_base_for_py=$(printf '%s' "$auth_origin" | sed 's|//auth|//mcp|')
-        fi
-        log "MCP: OAT-bound, github_login=$mcp_relay_login_for_py (issue ippoan/auth-worker#174)"
+        mcp_relay_url_for_py=$(printf '%s' "$github_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("mcp_url",""))' 2>/dev/null || echo "")
+        log "MCP: OAT-bound, github_login=$mcp_relay_login_for_py mcp_url=$mcp_relay_url_for_py (issue ippoan/auth-worker#174)"
       fi
       if [ -n "$ref_json" ]; then
         ref_files_mcp_token_for_py="$ref_json"
@@ -370,6 +372,7 @@ else
   GITHUB_MCP_URL_BASE="$GITHUB_MCP_URL_BASE" \
   MCP_RELAY_LOGIN="$mcp_relay_login_for_py" \
   MCP_RELAY_URL_BASE="$mcp_relay_url_base_for_py" \
+  MCP_RELAY_URL="$mcp_relay_url_for_py" \
   GITHUB_MCP_TOKEN_JSON="$github_mcp_token_for_py" \
   REF_FILES_MCP_TOKEN_JSON="$ref_files_mcp_token_for_py" \
   python3 - "$CLAUDE_JSON_DEST" "$CC_RELAY_MCP_URL" <<'PY'
@@ -390,6 +393,10 @@ mcp_relay_login = os.environ.get("MCP_RELAY_LOGIN", "")
 mcp_relay_url_base = os.environ.get(
     "MCP_RELAY_URL_BASE", admin_url_base
 ).rstrip("/")
+# OAT path で grant response から取った完全 URL (`https://mcp(-staging).ippoan.org/u/<login>/mcp`)。
+# set されていれば mcp_relay_url_base + login の再構築より優先する (staging で
+# 発行された binding_jwt を prod URL に attach する不整合を防ぐ)。
+mcp_relay_url = os.environ.get("MCP_RELAY_URL", "")
 github_mcp_token_raw = os.environ.get("GITHUB_MCP_TOKEN_JSON", "")
 ref_files_mcp_token_raw = os.environ.get("REF_FILES_MCP_TOKEN_JSON", "")
 
@@ -430,7 +437,7 @@ else:
 
 mcp_relay_msg = None
 if mcp_relay_login:
-    relay_url = f"{mcp_relay_url_base}/u/{mcp_relay_login}/mcp"
+    relay_url = mcp_relay_url or f"{mcp_relay_url_base}/u/{mcp_relay_login}/mcp"
 
     def _build_entry(token_raw):
         entry = {"type": "http", "url": relay_url}
