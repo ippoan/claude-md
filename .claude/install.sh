@@ -97,6 +97,17 @@ set -eu
 INSTALL_SH_VERSION="2026.05.16-163932-dde1d07"
 
 CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
+
+# Sentinel consumed by session-start-install-mcp-relay.sh's grant_one() to
+# bound the SessionStart hook race documented in ippoan/claude-md#38:
+# install-mcp-relay runs in parallel with refresh-installer, but its
+# cache-exists check depends on install.sh's OAT hydrate (Section 5) having
+# already finished. Remove now (so a re-run from refresh-installer doesn't
+# expose the previous session's stale sentinel) and touch at the very end.
+INSTALL_DONE="${CLAUDE_INSTALL_DONE:-$CLAUDE_HOME/.install-done}"
+mkdir -p "$(dirname "$INSTALL_DONE")"
+rm -f "$INSTALL_DONE"
+
 CLAUDE_MD_BASE_URL="${CLAUDE_MD_BASE_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main}"
 TEMPLATE_URL="${CLAUDE_MD_TEMPLATE_URL:-$CLAUDE_MD_BASE_URL/.claude/settings.json.template}"
 SETTINGS_DEST="${CLAUDE_SETTINGS_DEST:-$CLAUDE_HOME/settings.json}"
@@ -536,3 +547,10 @@ if [ -n "${self_sha:-}" ]; then
   echo "$self_sha" > "$REFRESH_MARKER"
   log "refresh-marker: $REFRESH_MARKER (sha ${self_sha:0:12})"
 fi
+
+# --- 8. Install-done sentinel (always written very last) ---
+# Wakes session-start-install-mcp-relay.sh's grant_one() so it can read the
+# token cache hydrated in Section 5 instead of racing past it. See
+# ippoan/claude-md#38 for the race description.
+touch "$INSTALL_DONE"
+log "install-done: $INSTALL_DONE"

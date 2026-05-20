@@ -99,6 +99,26 @@ if [ "${SKIP_OAT_BINDING:-0}" != "1" ] && [ -r "$OAT_FILE" ]; then
   oat=$(tr -d '[:space:]' < "$OAT_FILE")
   if [ -n "$oat" ]; then
     oat_hash=$(printf '%s' "$oat" | sha256sum | awk '{print $1}')
+    # Wait for install.sh to finish (issue ippoan/claude-md#38). SessionStart
+    # hooks fire in parallel, so refresh-installer's install.sh re-run can
+    # hydrate the token cache *after* this hook starts. install.sh removes
+    # $CLAUDE_HOME/.install-done on entry and touches it as its very last
+    # step, so a present sentinel means "install.sh fully finished, cache is
+    # in its final state". 30s cap keeps SessionStart total time bounded for
+    # the case where install.sh isn't running this session at all (then the
+    # sentinel from the Setup-script run is already present and we proceed
+    # immediately).
+    install_done="${CLAUDE_INSTALL_DONE:-$CLAUDE_HOME/.install-done}"
+    install_done_waited=0
+    while [ ! -f "$install_done" ] && [ "$install_done_waited" -lt 60 ]; do
+      sleep 0.5
+      install_done_waited=$((install_done_waited + 1))
+    done
+    if [ -f "$install_done" ]; then
+      oat_msg="$oat_msg install-done:waited=${install_done_waited}"
+    else
+      oat_msg="$oat_msg install-done:timeout"
+    fi
     # Try grant-via-oat for each aud. Skip when token cache file already exists
     # (idempotent — pre-staged token JSON env / previous session の cache を尊重)。
     grant_one() {
