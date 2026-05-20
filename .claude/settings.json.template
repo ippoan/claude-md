@@ -92,6 +92,11 @@
             "type": "command",
             "command": "/root/.claude/hooks/session-start-refresh-installer.sh",
             "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "/root/.claude/hooks/session-start-install-mcp-relay.sh",
+            "timeout": 60
           }
         ]
       }

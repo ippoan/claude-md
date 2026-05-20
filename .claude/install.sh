@@ -48,13 +48,31 @@
 #                            unset の場合は既存 cc-relay entry のみ登録 (graceful skip)。
 #                            JSON 例: {"github_login":"alice","binding_jwt":"<JWT>",...}
 #                            binding_jwt 以外の field は無視される (cache file 全体を貼り付け可)。
+#   GITHUB_LOGIN             ippoan/mcp-relay-rs binaries (github-mcp-server-rs +
+#                            ref-files-mcp-server-rs) を `~/.claude.json` に登録する
+#                            時の URL に埋め込む github username。CCoW Setup-script
+#                            secret として export 推奨。unset の場合は mcp-relay
+#                            entry 自体を register しない (graceful skip)。
+#   MCP_RELAY_URL_BASE       ippoan/mcp-relay-rs binaries の relay base URL
+#                            (default: $GITHUB_MCP_URL_BASE = mcp.ippoan.org)
+#                            staging override: https://mcp-staging.ippoan.org
+#   GITHUB_MCP_TOKEN_JSON    github-mcp-server-rs の token cache JSON を CCoW
+#                            env var に貼った値。set されると mcp-relay 登録時の
+#                            `github-mcp-server-rs` entry に `Authorization: Bearer`
+#                            header を埋め込み、Claude Code 側 OAuth flow を skip。
+#                            (binary 側の token cache hydrate は install-mcp.sh hook
+#                            が同名 env を再読する。)
+#   REF_FILES_MCP_TOKEN_JSON 同上、`ref-files-mcp-server-rs` entry 用。
 #   SKIP_SETTINGS=1          1 を立てると settings.json install を skip
 #   SKIP_USER_MEMORY=1       1 を立てると ~/.claude/CLAUDE.md の locale block install を skip
 #                            (global で英語応答にしたい時はこれを立てる)
 #   SKIP_HOOK=1              1 を立てると SessionStart hook script の配置を skip
 #   SKIP_CC_RELAY=1          1 を立てると cc-relay clone を skip
-#   SKIP_MCP=1               1 を立てると MCP 登録を skip (cc-relay + github-mcp-admin 両方)
+#   SKIP_MCP=1               1 を立てると MCP 登録を skip (cc-relay + github-mcp-admin
+#                            + mcp-relay 全部)
 #   SKIP_GITHUB_MCP_ADMIN=1  1 を立てると GITHUB_MCP_ADMIN_TOKEN_JSON が set でも admin entry を skip
+#   SKIP_MCP_RELAY=1         1 を立てると GITHUB_LOGIN が set でも github-mcp-server-rs +
+#                            ref-files-mcp-server-rs entry を skip
 #   CLAUDE_INSTALL_STAMP     stamp ファイル path (default: $CLAUDE_HOME/.install-stamp)
 #                            このファイルの mtime と中身で「今 session で install.sh が
 #                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
@@ -86,6 +104,7 @@ HOOK_SCRIPTS=(
   "session-start-snapshot.sh"
   "pre-tool-claude-dir-drift.sh"
   "session-start-refresh-installer.sh"
+  "session-start-install-mcp-relay.sh"
 )
 LEGACY_HOOK_URL="${CLAUDE_HOOK_URL:-}"
 
@@ -105,6 +124,7 @@ LEGACY_HOOK_URL="${CLAUDE_HOOK_URL:-}"
 HOOK_SHAS=$(cat <<'HOOK_SHAS_EOF'
 pre-tool-claude-dir-drift.sh=bdf35f2dfb5dd360c320d84d9f8368dd585a90b4366aa30670c26e7087ccebd0
 session-start-install-hooks.sh=cf6f1e7251ec34cba9f3d823ced5bcfd744a58377269ccc5a3c6c9d4ea9f2212
+session-start-install-mcp-relay.sh=0000000000000000000000000000000000000000000000000000000000000000
 session-start-refresh-installer.sh=b81ad4f1e01af703be96a7d9881823e06804b46d085110bcaaf20ae3689658aa
 session-start-snapshot.sh=42ccba0438c8e20fc064c88d2ca63a1c76cdc6c63189bfce4c2b8ebf02392afb
 HOOK_SHAS_EOF
@@ -122,6 +142,12 @@ fi
 CC_RELAY_MCP_URL="${CC_RELAY_MCP_URL:-https://mcp.ippoan.org/mcp}"
 GITHUB_MCP_URL_BASE="${GITHUB_MCP_URL_BASE:-https://mcp.ippoan.org}"
 GITHUB_MCP_ADMIN_TOKEN_JSON="${GITHUB_MCP_ADMIN_TOKEN_JSON:-}"
+# mcp-relay (ippoan/mcp-relay-rs binaries) — defaults to same base URL as
+# github-mcp-server-rs admin (= prod), staging override is set via env.
+MCP_RELAY_URL_BASE="${MCP_RELAY_URL_BASE:-$GITHUB_MCP_URL_BASE}"
+GITHUB_LOGIN="${GITHUB_LOGIN:-}"
+GITHUB_MCP_TOKEN_JSON="${GITHUB_MCP_TOKEN_JSON:-}"
+REF_FILES_MCP_TOKEN_JSON="${REF_FILES_MCP_TOKEN_JSON:-}"
 
 log() { echo "[install.sh] $*"; }
 
@@ -247,8 +273,19 @@ else
   else
     admin_token_for_py="$GITHUB_MCP_ADMIN_TOKEN_JSON"
   fi
+  # mcp-relay entry の opt-in switch。SKIP_MCP_RELAY=1 で disable。GITHUB_LOGIN
+  # 未設定でも script 側でも graceful skip。
+  if [ "${SKIP_MCP_RELAY:-0}" = "1" ]; then
+    mcp_relay_login_for_py=""
+  else
+    mcp_relay_login_for_py="$GITHUB_LOGIN"
+  fi
   GITHUB_MCP_ADMIN_TOKEN_JSON="$admin_token_for_py" \
   GITHUB_MCP_URL_BASE="$GITHUB_MCP_URL_BASE" \
+  MCP_RELAY_LOGIN="$mcp_relay_login_for_py" \
+  MCP_RELAY_URL_BASE="$MCP_RELAY_URL_BASE" \
+  GITHUB_MCP_TOKEN_JSON="$GITHUB_MCP_TOKEN_JSON" \
+  REF_FILES_MCP_TOKEN_JSON="$REF_FILES_MCP_TOKEN_JSON" \
   python3 - "$CLAUDE_JSON_DEST" "$CC_RELAY_MCP_URL" <<'PY'
 import json, os, sys
 
@@ -256,6 +293,19 @@ path = sys.argv[1]
 cc_relay_url = sys.argv[2]
 admin_token_raw = os.environ.get("GITHUB_MCP_ADMIN_TOKEN_JSON", "")
 admin_url_base = os.environ.get("GITHUB_MCP_URL_BASE", "https://mcp.ippoan.org").rstrip("/")
+
+# mcp-relay (ippoan/mcp-relay-rs binaries) — Option C multiplex (auth-worker
+# PR #167): 同 URL に 2 entry を登録すると Claude Code 側で 2 server として
+# 見える (=tool prefix `mcp__github-mcp-server-rs__*` と
+# `mcp__ref-files-mcp-server-rs__*` の両方で呼び分けられる)。実 backend は
+# 1 McpSession DO で aggregator が tools/list を merge し、tool name → service
+# id cache で正しい binary に dispatch する。
+mcp_relay_login = os.environ.get("MCP_RELAY_LOGIN", "")
+mcp_relay_url_base = os.environ.get(
+    "MCP_RELAY_URL_BASE", admin_url_base
+).rstrip("/")
+github_mcp_token_raw = os.environ.get("GITHUB_MCP_TOKEN_JSON", "")
+ref_files_mcp_token_raw = os.environ.get("REF_FILES_MCP_TOKEN_JSON", "")
 
 try:
     with open(path) as f:
@@ -292,6 +342,35 @@ else:
     if servers.pop("github-mcp-admin", None) is not None:
         admin_msg = "removed stale github-mcp-admin entry (GITHUB_MCP_ADMIN_TOKEN_JSON not set)"
 
+mcp_relay_msg = None
+if mcp_relay_login:
+    relay_url = f"{mcp_relay_url_base}/u/{mcp_relay_login}/mcp"
+
+    def _build_entry(token_raw):
+        entry = {"type": "http", "url": relay_url}
+        if not token_raw:
+            return entry
+        try:
+            tok = json.loads(token_raw)
+            jwt = tok.get("binding_jwt") or tok.get("access_token")
+            if jwt:
+                entry["headers"] = {"Authorization": f"Bearer {jwt}"}
+        except json.JSONDecodeError:
+            # graceful: token JSON 壊れていても URL register は続行
+            pass
+        return entry
+
+    servers["github-mcp-server-rs"] = _build_entry(github_mcp_token_raw)
+    servers["ref-files-mcp-server-rs"] = _build_entry(ref_files_mcp_token_raw)
+    mcp_relay_msg = f"registered github-mcp-server-rs + ref-files-mcp-server-rs ({relay_url})"
+else:
+    removed = []
+    for k in ("github-mcp-server-rs", "ref-files-mcp-server-rs"):
+        if servers.pop(k, None) is not None:
+            removed.append(k)
+    if removed:
+        mcp_relay_msg = f"removed stale mcp-relay entries ({', '.join(removed)}; MCP_RELAY_LOGIN not set)"
+
 tmp = path + ".tmp"
 with open(tmp, "w") as f:
     json.dump(data, f, indent=2)
@@ -299,6 +378,8 @@ os.replace(tmp, path)
 print(f"[install.sh] MCP: registered cc-relay ({cc_relay_url}) in {path}")
 if admin_msg:
     print(f"[install.sh] MCP: {admin_msg}")
+if mcp_relay_msg:
+    print(f"[install.sh] MCP: {mcp_relay_msg}")
 PY
 fi
 
