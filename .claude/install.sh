@@ -324,6 +324,14 @@ else
 
       # Curl grant-via-oat for one aud, on 200 print JSON to stdout + side-effect
       # cache file。失敗時は stderr に http_code を log + stdout は空。
+      #
+      # cache file は **binary 互換 TokenSet schema** に変換して書き込む
+      # (`crates/mcp-relay/src/token_cache.rs::TokenSet`):
+      #   { access_token, refresh_token, scope, expires_at, obtained_at }
+      # ↔ grant-via-oat response (raw):
+      #   { binding_jwt, mcp_url, github_login, org_uuid, aud, scope, expires_in }
+      # raw response はそのまま stdout に出して caller の python parsing
+      # (mcp_relay_login_for_py / mcp_relay_url_for_py 抽出) に使う。
       oat_grant() {
         local aud="$1" cache="$2"
         local tmp http_code
@@ -336,7 +344,27 @@ else
           2>/dev/null || echo "000")
         if [ "$http_code" = "200" ]; then
           mkdir -p "$(dirname "$cache")"
-          cp "$tmp" "$cache"
+          # Transform grant-via-oat response → binary TokenSet schema.
+          # Without this, github-mcp-server-rs / ref-files-mcp-server-rs
+          # binaries die at startup with
+          # `parse token cache ... missing field 'access_token'`.
+          if ! python3 -c '
+import json, sys, datetime
+src = json.load(open(sys.argv[1]))
+now = datetime.datetime.now(datetime.timezone.utc)
+out = {
+    "access_token": src["binding_jwt"],
+    "refresh_token": src.get("refresh_token", ""),
+    "scope": src.get("scope", "mcp.read mcp.write"),
+    "expires_at": int(now.timestamp()) + int(src.get("expires_in", 86400)),
+    "obtained_at": now.isoformat(),
+}
+json.dump(out, open(sys.argv[2], "w"))
+' "$tmp" "$cache" 2>/dev/null; then
+            log "MCP: OAT grant-via-oat($aud) response → cache transform failed"
+            rm -f "$tmp"
+            return 1
+          fi
           chmod 600 "$cache"
           cat "$tmp"
           rm -f "$tmp"
