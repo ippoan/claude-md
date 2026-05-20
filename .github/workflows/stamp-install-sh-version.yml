@@ -15,8 +15,14 @@ name: stamp install.sh version
 # Without this, hook-only PRs (e.g. #16) silently leave cached
 # ~/.claude environments running the old hook.
 #
-# Loop prevention: the workflow conditional skips runs triggered by
-# `github-actions[bot]`, so the stamping commit itself does not retrigger.
+# Loop prevention: the workflow conditional skips its own stamping commits
+# (identified by the `chore(install): stamp INSTALL_SH_VERSION=` prefix it
+# always uses), so the stamping commit does not retrigger itself. We do NOT
+# skip on `github.actor == 'github-actions[bot]'` — that condition wrongly
+# excluded PR-merge pushes performed by ippoan/ci-workflows/auto-merge.yml,
+# which also push as `github-actions[bot]` and left install.sh / hook
+# changes from PRs #21..#35 unstamped for ~4 days (see issue
+# ippoan/auth-worker#174 follow-up investigation).
 
 on:
   push:
@@ -36,7 +42,7 @@ permissions:
 
 jobs:
   stamp:
-    if: github.actor != 'github-actions[bot]'
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(install): stamp INSTALL_SH_VERSION=') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
