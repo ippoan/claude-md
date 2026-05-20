@@ -120,26 +120,46 @@ if [ "${SKIP_OAT_BINDING:-0}" != "1" ] && [ -r "$OAT_FILE" ]; then
       oat_msg="$oat_msg install-done:timeout"
     fi
     # Try grant-via-oat for each aud. Skip when token cache file already exists
-    # (idempotent — pre-staged token JSON env / previous session の cache を尊重)。
+    # *and* contains a valid binary TokenSet schema (access_token field).
+    # Otherwise re-grant + overwrite so the binary doesn't die at startup with
+    # `parse token cache ... missing field 'access_token'` (= self-heal for the
+    # case where an older install.sh / hook wrote a raw grant-via-oat response
+    # without the transform, leaving disk in an unparseable shape).
     grant_one() {
       local aud="$1" cache="$2" label="$3"
       if [ -s "$cache" ]; then
-        # 既存 cache から github_login を読んで downstream に伝える
-        # (install.sh が OAT path で焼いた直後 hook が走るケース、または
-        # 前 session の cache が container に残っているケース)。これが無いと
-        # GITHUB_LOGIN unset 判定で hook が skip emit してしまう。
-        # 既存 cache は (a) 旧 install.sh が書いた raw response shape
-        # (`github_login` トップレベル)、もしくは (b) 新 install.sh が書いた
-        # binary TokenSet shape (`github_login` なし、`access_token` のみ) の
-        # どちらか。両方に対応するため、github_login が空なら GITHUB_LOGIN
-        # env を fallback として使う (= CCoW Setup script で立てた場合)。
-        local login
-        login=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("github_login",""))' "$cache" 2>/dev/null || echo "")
-        if [ -n "$login" ] && [ -z "$oat_grant_login" ]; then
-          oat_grant_login="$login"
-        fi
-        oat_msg="$oat_msg ${label}:cache-exists"
-        return 0
+        # 既存 cache の schema validate: binary が要求する `access_token` field が
+        # 入っているか確認。入っていれば pre-staged token JSON env / 前 session の
+        # cache を尊重して skip。入っていなければ (= 旧 install.sh / 旧 hook が
+        # raw response を書いた壊れた cache、または部分 transform 失敗の中途半端
+        # な shape) fall through して re-grant + overwrite で自己修復する。
+        local cache_state
+        cache_state=$(python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print("invalid_json")
+    sys.exit(0)
+if d.get("access_token"):
+    print("valid:" + (d.get("github_login") or ""))
+else:
+    print("missing_access_token")
+' "$cache" 2>/dev/null || echo "invalid_json")
+        case "$cache_state" in
+          valid:*)
+            local login="${cache_state#valid:}"
+            if [ -n "$login" ] && [ -z "$oat_grant_login" ]; then
+              oat_grant_login="$login"
+            fi
+            oat_msg="$oat_msg ${label}:cache-exists"
+            return 0
+            ;;
+          missing_access_token|invalid_json)
+            # 壊れた cache を上書きする path に fall through
+            oat_msg="$oat_msg ${label}:cache-invalid-reroll(${cache_state})"
+            ;;
+        esac
       fi
       local tmp resp
       tmp=$(mktemp)
