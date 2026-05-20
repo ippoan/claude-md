@@ -1,6 +1,5 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "locale": "ja",
   "env": {
     "LANG": "ja_JP.UTF-8",
     "LC_ALL": "ja_JP.UTF-8"
