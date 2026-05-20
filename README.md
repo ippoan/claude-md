@@ -250,6 +250,49 @@ env override:
 | `CLAUDE_DRIFT_SNAPSHOT` | `$CLAUDE_HOME/.session-snapshot` | snapshot file path |
 | `CLAUDE_DRIFT_MAX_FILES` | `10` | warning に列挙する最大 file 数 |
 
+### MCP relay bootstrap hook (`session-start-install-mcp-relay.sh`)
+
+ippoan/mcp-relay-rs の 2 binary (`github-mcp-server-rs` + `ref-files-mcp-server-rs`) を Option C multiplex として 1 WebSocket bridge に乗せて mcp(-staging).ippoan.org に attach する hook。`CLAUDE_CODE_REMOTE=true` の時のみ動き、ローカル session では no-op。
+
+#### OAT-based silent bootstrap (issue ippoan/auth-worker#174)
+
+CCoW container には `/home/claude/.claude/remote/.oauth_token` に Anthropic OAT (`sk-ant-oat01-...`) が常駐するが、Anthropic identity endpoint は OAT を 403 で reject するため、OAT alone で github_login を引く path は無い。本 hook は auth-worker の以下の 2 endpoint を経由して silent bootstrap する:
+
+1. **`POST /mcp/pair/grant-via-oat`** — `Authorization: Bearer <OAT>` で叩き、KV bind 済みなら `binding_jwt` + `github_login` を取得して `~/.config/{github,ref-files}-mcp-server-rs/token-<env>.json` に直接焼く (= 既存 install-mcp.sh の token cache hydrate path に乗せる)。404 が返った場合のみ次の step に進む。
+2. **`POST /mcp/pair/register-via-github-comment`** — 404 (= OAT 未 bind) を受けた hook は additionalContext で Claude に register orchestration を要請する。Claude は `mcp__github__add_issue_comment` で tracking issue (default: ippoan/auth-worker#174) に `oat-binding: <oat_hash> <nonce>` を投稿し、その comment URL を register endpoint に POST する。auth-worker は anonymous で GitHub API を叩いて `comment.user.login` を root-of-trust に取得、KV に 30d TTL で焼く。以降 fresh container で grant-via-oat 即 200。
+
+```
+[fresh container N+1]
+session-start-install-mcp-relay.sh:
+  1. OAT を /home/claude/.claude/remote/.oauth_token から read
+  2. POST $AUTH_WORKER_ORIGIN/mcp/pair/grant-via-oat (Bearer $OAT, aud=github-mcp-server-rs)
+     ↓ 200
+  3. response JSON を ~/.config/github-mcp-server-rs/token-staging.json に焼く
+  4. aud=ref-files-mcp-server-rs で同じく hydrate
+  5. install-mcp(-ref-files).sh を curl | bash — token cache 既存なので auth step 全 skip
+```
+
+偽装耐性は auth-worker 側で担保:
+
+| 攻撃 | 防御 |
+|---|---|
+| 他人の login で comment 投げる | `mcp__github__add_issue_comment` は CCoW session の user identity でしか動かない (Anthropic proxy 経由)、不可能 |
+| 自分の OAT_hash を yhonda-ohishi の comment に書いた風に偽造 | comment は GitHub server-side で `user.login` を enforce、auth-worker が anonymous API で直接 fetch して検証 |
+| 自分の OAT_hash を tracking issue に書いて他人になりすまし | `comment.user.login` = 自分の login で record される → 自分の login にしか bind しない (自爆) |
+| OAT 漏洩 | rate limit per OAT_hash 10/min、Anthropic API で revoke 反映を即時検出 |
+
+#### Legacy bootstrap path
+
+OAT が読めない / `SKIP_OAT_BINDING=1` / register 未完了の時は従来の path を試す:
+
+- `GITHUB_LOGIN` + `GITHUB_MCP_TOKEN_JSON` / `REF_FILES_MCP_TOKEN_JSON` が CCoW Setup-script secret として set されていれば、install-mcp.sh が token cache JSON を hydrate して silent bootstrap
+- 上記 token JSON も無い場合は 1-click pair flow に fall back し、pair URL を additionalContext に出して user の click を待つ
+
+#### 失敗時の挙動
+
+- OAT が読めない / curl fail / Anthropic 401 / 404 not_bound — fail-open (additionalContext に状況を記載して終了)
+- install-mcp.sh / install-mcp-ref-files.sh が exit≠0 — `github=fail` / `ref-files=fail` を additionalContext に表示。session 自体は止めない
+
 ### env override
 
 | 変数 | 既定値 | 用途 |
@@ -275,6 +318,10 @@ env override:
 | `SKIP_GITHUB_MCP_ADMIN` / `SKIP_MCP_RELAY` | unset | `1` で個別 MCP entry を skip (URL register のみ skip。SKIP_MCP=1 だと全部 skip) |
 | `CLAUDE_HOOKS_MCP_RELAY_BRANCH` | `main` | session-start-install-mcp-relay.sh が install-mcp(-ref-files).sh を fetch する ippoan/mcp-relay-rs branch |
 | `SKIP_INSTALL_MCP_RELAY` | unset | `1` で session-start-install-mcp-relay.sh hook 全体を skip (URL register は別軸) |
+| `AUTH_WORKER_ORIGIN` | `https://auth-staging.ippoan.org` | session-start-install-mcp-relay.sh が OAT-based bootstrap (`/mcp/pair/grant-via-oat` + register, issue ippoan/auth-worker#174) で叩く auth-worker origin。prod 切替: `https://auth.ippoan.org` |
+| `SKIP_OAT_BINDING` | unset | `1` で OAT-based silent bootstrap (issue #174) を skip。legacy env/token cache の path のみで bootstrap する |
+| `OAT_BINDING_TRACKING_REPO` | `ippoan/auth-worker` | OAT register endpoint で identity proof として使う GitHub issue comment の投稿先 owner/repo |
+| `OAT_BINDING_TRACKING_ISSUE` | `174` | 同上 issue number。本 issue 自体を tracking 用に兼用する設計 |
 | `CLAUDE_INSTALL_STAMP` | `$CLAUDE_HOME/.install-stamp` | stamp ファイル path。`cat` 1 発で `install_sh_version` と `iso` 時刻を確認でき、setup script で走ったか cache 由来かを判別できる |
 | `CLAUDE_HOOKS_INSTALL_TTL` | `3600` | hook 側: network sync を skip する TTL (秒) |
 | `CLAUDE_HOOKS_SCAN_DIRS` | `/home/user` | hook 側: attached repo を探す親 dir |
