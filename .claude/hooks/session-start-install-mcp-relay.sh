@@ -108,6 +108,11 @@ if [ "${SKIP_OAT_BINDING:-0}" != "1" ] && [ -r "$OAT_FILE" ]; then
         # (install.sh が OAT path で焼いた直後 hook が走るケース、または
         # 前 session の cache が container に残っているケース)。これが無いと
         # GITHUB_LOGIN unset 判定で hook が skip emit してしまう。
+        # 既存 cache は (a) 旧 install.sh が書いた raw response shape
+        # (`github_login` トップレベル)、もしくは (b) 新 install.sh が書いた
+        # binary TokenSet shape (`github_login` なし、`access_token` のみ) の
+        # どちらか。両方に対応するため、github_login が空なら GITHUB_LOGIN
+        # env を fallback として使う (= CCoW Setup script で立てた場合)。
         local login
         login=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("github_login",""))' "$cache" 2>/dev/null || echo "")
         if [ -n "$login" ] && [ -z "$oat_grant_login" ]; then
@@ -127,10 +132,28 @@ if [ "${SKIP_OAT_BINDING:-0}" != "1" ] && [ -r "$OAT_FILE" ]; then
       case "$resp" in
         200)
           mkdir -p "$(dirname "$cache")"
-          cp "$tmp" "$cache"
-          chmod 600 "$cache"
+          # Transform grant-via-oat response → binary TokenSet schema before
+          # writing cache. Without this, github-mcp-server-rs /
+          # ref-files-mcp-server-rs binaries die at startup with
+          # `parse token cache ... missing field 'access_token'`.
+          # Response: { binding_jwt, mcp_url, github_login, org_uuid, aud, scope, expires_in }
+          # Cache:    { access_token, refresh_token, scope, expires_at, obtained_at }
           local login
-          login=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("github_login",""))' "$cache" 2>/dev/null || echo "")
+          login=$(python3 -c '
+import json, sys, datetime
+src = json.load(open(sys.argv[1]))
+now = datetime.datetime.now(datetime.timezone.utc)
+out = {
+    "access_token": src["binding_jwt"],
+    "refresh_token": src.get("refresh_token", ""),
+    "scope": src.get("scope", "mcp.read mcp.write"),
+    "expires_at": int(now.timestamp()) + int(src.get("expires_in", 86400)),
+    "obtained_at": now.isoformat(),
+}
+json.dump(out, open(sys.argv[2], "w"))
+print(src.get("github_login", ""))
+' "$tmp" "$cache" 2>/dev/null || echo "")
+          chmod 600 "$cache"
           if [ -n "$login" ]; then
             oat_grant_login="$login"
           fi
