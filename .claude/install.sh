@@ -80,6 +80,9 @@
 #   SKIP_OAT_BINDING=1       OAT-based bootstrap (`/mcp/pair/grant-via-oat`) を skip。
 #                            legacy env (GITHUB_LOGIN + GITHUB_MCP_TOKEN_JSON 等)
 #                            のみで mcpServers を登録する path に lock する
+#   SKIP_SKILLS_BOOTSTRAP=1  1 を立てると Setup-time skills clone (section 6) を skip。
+#                            CCoW `/` menu populate 用の seed が要らない時のみ。
+#                            session-start-install-hooks.sh 側の TTL refresh は別経路。
 #   CLAUDE_INSTALL_STAMP     stamp ファイル path (default: $CLAUDE_HOME/.install-stamp)
 #                            このファイルの mtime と中身で「今 session で install.sh が
 #                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
@@ -517,7 +520,95 @@ fi
 
 log "done"
 
-# --- 6. Install stamp (always written last) ---
+# --- 6. Skills install via CCoW git proxy (issue ippoan/claude-md#45) ---
+# CCoW container は環境 runner プロセスが container 起動と同時に
+# `http://local_proxy@127.0.0.1:<port>/git/<owner>/<repo>` を listen するため、
+# attached repo が未 mount の Setup script time でも proxy 自体は利用可能。
+# session-start-install-hooks.sh は attached repo の `.git/config` から port を
+# discover するが、Setup time にはそれが無い。代わりに /proc/net/tcp で
+# 127.0.0.1 LISTEN port を列挙し、各 port に
+# `/git/yhonda-ohishi/claude-skills/info/refs?service=git-upload-pack` を probe
+# して 200 を返した port を proxy とみなす。
+#
+# 既存 SessionStart hook (`session-start-install-hooks.sh`) は TTL 1h で
+# upstream を pull する path として温存。本 section は initial seed のみ担当。
+# CCoW UI の `/` menu populate は SessionStart hook より前に走るらしく、
+# hook seed だけだと top-level skill が menu に出ない (PR #45 root cause)。
+if [ "${SKIP_SKILLS_BOOTSTRAP:-0}" = "1" ]; then
+  log "skip: SKIP_SKILLS_BOOTSTRAP=1"
+elif [ ! -r /proc/net/tcp ]; then
+  log "skip: skills bootstrap (/proc/net/tcp not readable)"
+else
+  SKILLS_PROXY=""
+  # awk: state 0A = LISTEN, addr 0100007F = 127.0.0.1 (little-endian)
+  while IFS= read -r _p; do
+    [ -z "$_p" ] && continue
+    if curl -fsS --max-time 3 -o /dev/null \
+        "http://local_proxy@127.0.0.1:${_p}/git/yhonda-ohishi/claude-skills/info/refs?service=git-upload-pack" \
+        2>/dev/null; then
+      SKILLS_PROXY="http://local_proxy@127.0.0.1:${_p}/git"
+      break
+    fi
+  done < <(awk 'NR>1 && $4=="0A" && $2 ~ /^0100007F:/ {p=$2; sub(/.*:/,"",p); printf "%d\n","0x"p}' /proc/net/tcp | sort -un)
+
+  if [ -z "$SKILLS_PROXY" ]; then
+    log "skip: skills bootstrap (CCoW git proxy not detected on loopback)"
+  else
+    SKILLS_DIR="$CLAUDE_HOME/skills"
+    PRIV_SRC="$CLAUDE_HOME/sources/claude-skills"
+    PUB_SRC="$CLAUDE_HOME/sources/anthropic-skills"
+    mkdir -p "$SKILLS_DIR" "$(dirname "$PRIV_SRC")"
+
+    clone_via_proxy() {
+      local _owner=$1 _repo=$2 _dest=$3 _fallback=${4:-}
+      if [ -d "$_dest/.git" ]; then return 0; fi
+      if git clone --depth 1 --quiet "${SKILLS_PROXY}/${_owner}/${_repo}" "$_dest" 2>/dev/null; then
+        return 0
+      fi
+      if [ -n "$_fallback" ] && git clone --depth 1 --quiet "$_fallback" "$_dest" 2>/dev/null; then
+        return 0
+      fi
+      return 1
+    }
+
+    clone_via_proxy yhonda-ohishi claude-skills "$PRIV_SRC" \
+      || log "warn: claude-skills clone via proxy failed (no public fallback)"
+    clone_via_proxy anthropics skills "$PUB_SRC" "https://github.com/anthropics/skills.git" \
+      || log "warn: anthropics/skills clone failed (proxy + github fallback)"
+
+    # symlink SKILL.md → ~/.claude/skills/ (session-start-install-hooks.sh と
+    # 同じ conflict policy: claude-skills (own) wins、anthropic-skills は
+    # 空きスロットだけ埋める)
+    SKILL_COUNT=0
+    link_skill_dir() {
+      local _src=$1 _allow_relink=$2
+      [ -d "$_src" ] || return 0
+      while IFS= read -r _md; do
+        local _dir _name _target
+        _dir="$(dirname "$_md")"
+        _name="$(basename "$_dir")"
+        _target="$SKILLS_DIR/$_name"
+        if [ -L "$_target" ]; then
+          if [ "$_allow_relink" = "1" ]; then
+            ln -sfn "$_dir" "$_target" 2>/dev/null && SKILL_COUNT=$((SKILL_COUNT + 1))
+          fi
+        elif [ ! -e "$_target" ]; then
+          ln -s "$_dir" "$_target" 2>/dev/null && SKILL_COUNT=$((SKILL_COUNT + 1))
+        fi
+      done < <(find "$_src" -name SKILL.md -not -path '*/.git/*' 2>/dev/null)
+    }
+    link_skill_dir "$PRIV_SRC" 1
+    link_skill_dir "$PUB_SRC"  0
+
+    # SessionStart hook の TTL marker を seed と同 epoch で touch。
+    # → 直後の最初の hook 起動が redundant な network sync を skip。
+    # 60min 経過後 (= 別 session) には hook が改めて upstream を pull する。
+    touch "$CLAUDE_HOME/.install-hooks-marker"
+    log "skills: $SKILL_COUNT symlinks (via $SKILLS_PROXY)"
+  fi
+fi
+
+# --- 7. Install stamp (always written last) ---
 # fresh-env 検証用の epoch + ISO timestamp + script SHA + base URL を
 # $CLAUDE_HOME/.install-stamp に書き出す。次の session で `cat` 1 発で
 # 「setup script で install.sh が走ったか」「いつの版か」を即判定できる。
@@ -536,7 +627,7 @@ hooks_installed=$([ "${SKIP_HOOK:-0}" = "1" ] && echo "skipped" || printf '%s,' 
 STAMP
 log "stamp: $STAMP_DEST ($STAMP_NOW_ISO, version=$INSTALL_SH_VERSION)"
 
-# --- 7. Refresh marker (consumed by session-start-refresh-installer.sh) ---
+# --- 8. Refresh marker (consumed by session-start-refresh-installer.sh) ---
 # Record sha256 of *the same install.sh content that just ran* so the
 # SessionStart refresh hook can detect when main has moved forward.
 # Re-fetch from the URL because $0 is "bash" when curl|bash'd.
@@ -548,7 +639,7 @@ if [ -n "${self_sha:-}" ]; then
   log "refresh-marker: $REFRESH_MARKER (sha ${self_sha:0:12})"
 fi
 
-# --- 8. Install-done sentinel (always written very last) ---
+# --- 9. Install-done sentinel (always written very last) ---
 # Wakes session-start-install-mcp-relay.sh's grant_one() so it can read the
 # token cache hydrated in Section 5 instead of racing past it. See
 # ippoan/claude-md#38 for the race description.
