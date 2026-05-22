@@ -19,17 +19,29 @@ memory) に `Respond in English.` と明記する。project memory が user memo
 全 session で英語にしたい場合は CCoW environment の Setup script で
 `SKIP_USER_MEMORY=1` を export してから install.sh を叩く。
 
-## PR 作成後の auto-merge
+## Claude による auto-merge enable は禁止
 
-`mcp__github__create_pull_request` で PR を作ったら、**同じ turn のうちに必ず**
-`mcp__github__enable_pr_auto_merge` (`mergeMethod: "SQUASH"`) を呼んで auto-merge
-を有効化する。CI green + required approval が揃った時点で自動 merge される運用
-を前提にしているため、これを忘れると merge が止まる。
+Claude Code セッションが `mcp__github__enable_pr_auto_merge` を呼ぶことは
+**user が明示的に指示したとき以外は禁止**。reflex で叩かない。
 
-- 既に merge 済みの PR に呼ぶと `Pull request is already merged` が返るが
-  no-op で無害
-- branch protection / "Allow auto-merge" が repo 側で off の場合は graceful に
-  失敗するが、その場合も呼ぶこと自体は試みる (失敗した repo は `/wt-direct-push`
-  候補か再確認する)
-- `/pr-push` skill 経由は内部で auto-merge を enable するので追加呼び出し不要。
-  **手で `mcp__github__create_pull_request` を叩いた時** が落としやすいケース。
+### 理由 (実害ケース)
+
+- branch protection の required status check が完全に揃っていない repo
+  (新設 CI check が未追加 / `ci /` prefix を持たない workflow が混在 等) で
+  auto-merge を enable すると、GitHub が「現時点で satisfied」と判定して
+  **CI が走り切る前に即 merge** する事故が起きる
+  (実害: `ippoan/secrets-inventory-gcp#21` / `ippoan/ci-dashboard#89` /
+  `ippoan/secrets-inventory#37`)
+- `ci-workflows/frontend-ci.yml` の `disable-auto-merge` step も Claude の enable
+  call の "数秒後" に走るので race を防げない — GitHub 側の merge 判定の方が早い
+- repo に `auto-merge.yml` workflow がある場合、CI green 完了後に workflow 自身が
+  enable するので、Claude が事前 enable する必要はない
+
+### 運用
+
+- ✅ 推奨: PR を作ったら CI 結果を `subscribe_pr_activity` で待ち、green を
+  確認した上で user が手動 merge する (または user が「auto-merge enable して」
+  と明示指示する)
+- ❌ 禁止: `mcp__github__create_pull_request` の直後に `enable_pr_auto_merge` を
+  反射的に呼ぶ
+- `/pr-push` skill は内部で必要な merge 制御を行うのでそちら経由なら OK
