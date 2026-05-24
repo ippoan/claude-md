@@ -126,6 +126,7 @@ HOOK_SCRIPTS=(
   "pre-tool-claude-dir-drift.sh"
   "session-start-refresh-installer.sh"
   "session-start-install-mcp-relay.sh"
+  "session-start-policy-reminder.sh"
 )
 LEGACY_HOOK_URL="${CLAUDE_HOOK_URL:-}"
 
@@ -146,6 +147,7 @@ HOOK_SHAS=$(cat <<'HOOK_SHAS_EOF'
 pre-tool-claude-dir-drift.sh=bdf35f2dfb5dd360c320d84d9f8368dd585a90b4366aa30670c26e7087ccebd0
 session-start-install-hooks.sh=cf6f1e7251ec34cba9f3d823ced5bcfd744a58377269ccc5a3c6c9d4ea9f2212
 session-start-install-mcp-relay.sh=0000000000000000000000000000000000000000000000000000000000000000
+session-start-policy-reminder.sh=0000000000000000000000000000000000000000000000000000000000000000
 session-start-refresh-installer.sh=b81ad4f1e01af703be96a7d9881823e06804b46d085110bcaaf20ae3689658aa
 session-start-snapshot.sh=42ccba0438c8e20fc064c88d2ca63a1c76cdc6c63189bfce4c2b8ebf02392afb
 HOOK_SHAS_EOF
