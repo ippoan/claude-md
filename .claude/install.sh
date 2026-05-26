@@ -9,8 +9,10 @@
 #   4. cc-relay shallow clone                           (ippoan/cc-relay)
 #   5. cc-relay MCP server を user-level ~/.claude.json に登録
 #      + (optional) github-mcp-admin entry を $GITHUB_MCP_ADMIN_TOKEN_JSON 経由で登録
-#   6. ~/.claude/.install-stamp                         (検証用 epoch+ISO+version+hooks)
-#   7. ~/.claude/.refresh-installer-marker              (refresh hook が使う sha)
+#   6. skills bootstrap                                 (CCoW git proxy 経由で claude-skills clone)
+#   7. plugins                                          (anthropics/claude-code marketplace の security-guidance を install)
+#   8. ~/.claude/.install-stamp                         (検証用 epoch+ISO+version+hooks)
+#   9. ~/.claude/.refresh-installer-marker              (refresh hook が使う sha)
 #
 # skills/hooks 自体の clone は SessionStart hook が CCoW の per-session git proxy
 # 経由で行う (= PAT/INTERNAL_SHARED_SECRET 不要、private repo にも access 可能)。
@@ -83,6 +85,13 @@
 #   SKIP_SKILLS_BOOTSTRAP=1  1 を立てると Setup-time skills clone (section 6) を skip。
 #                            CCoW `/` menu populate 用の seed が要らない時のみ。
 #                            session-start-install-hooks.sh 側の TTL refresh は別経路。
+#   SKIP_PLUGINS=1           1 を立てると plugins (section 7) install を skip。
+#   CLAUDE_PLUGINS           install する plugin の comma-separated list
+#                            (default: "security-guidance@anthropics/claude-code")
+#                            空文字を指定すると plugin install を skip (= SKIP_PLUGINS=1 相当)
+#   CLAUDE_PLUGIN_MARKETPLACES
+#                            事前 add する marketplace の comma-separated list
+#                            (default: "anthropics/claude-code")
 #   CLAUDE_INSTALL_STAMP     stamp ファイル path (default: $CLAUDE_HOME/.install-stamp)
 #                            このファイルの mtime と中身で「今 session で install.sh が
 #                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
@@ -610,7 +619,47 @@ else
   fi
 fi
 
-# --- 7. Install stamp (always written last) ---
+# --- 7. Plugins (anthropics/claude-code marketplace の security-guidance 等) ---
+# Claude Code の plugin は `claude plugin marketplace add` で marketplace を
+# 登録した上で `claude plugin install <name>@<marketplace>` で有効化する。
+# CCoW container には `claude` CLI が PATH 上にある想定だが、Setup script の
+# 早期段階で PATH が通っていないケースもあるので which で graceful skip する。
+# install 結果は ~/.claude/settings.json の enabledPlugins に persist されるため
+# 次 session 以降は再 install 不要 (idempotent)。
+if [ "${SKIP_PLUGINS:-0}" = "1" ]; then
+  log "skip: SKIP_PLUGINS=1"
+else
+  PLUGINS_LIST="${CLAUDE_PLUGINS-security-guidance@anthropics/claude-code}"
+  MARKETPLACES_LIST="${CLAUDE_PLUGIN_MARKETPLACES-anthropics/claude-code}"
+  if [ -z "$PLUGINS_LIST" ]; then
+    log "skip: CLAUDE_PLUGINS is empty"
+  elif ! command -v claude >/dev/null 2>&1; then
+    log "skip: plugins (claude CLI not on PATH)"
+  else
+    IFS=',' read -r -a _markets <<<"$MARKETPLACES_LIST"
+    for _mkt in "${_markets[@]}"; do
+      _mkt="${_mkt## }"; _mkt="${_mkt%% }"
+      [ -z "$_mkt" ] && continue
+      if claude plugin marketplace add "$_mkt" >/dev/null 2>&1; then
+        log "plugin marketplace: added $_mkt"
+      else
+        log "plugin marketplace: $_mkt already added or add failed (continuing)"
+      fi
+    done
+    IFS=',' read -r -a _plugins <<<"$PLUGINS_LIST"
+    for _plg in "${_plugins[@]}"; do
+      _plg="${_plg## }"; _plg="${_plg%% }"
+      [ -z "$_plg" ] && continue
+      if claude plugin install "$_plg" >/dev/null 2>&1; then
+        log "plugin: installed $_plg"
+      else
+        log "warn: plugin install failed for $_plg (continuing)"
+      fi
+    done
+  fi
+fi
+
+# --- 8. Install stamp (always written last) ---
 # fresh-env 検証用の epoch + ISO timestamp + script SHA + base URL を
 # $CLAUDE_HOME/.install-stamp に書き出す。次の session で `cat` 1 発で
 # 「setup script で install.sh が走ったか」「いつの版か」を即判定できる。
@@ -629,7 +678,7 @@ hooks_installed=$([ "${SKIP_HOOK:-0}" = "1" ] && echo "skipped" || printf '%s,' 
 STAMP
 log "stamp: $STAMP_DEST ($STAMP_NOW_ISO, version=$INSTALL_SH_VERSION)"
 
-# --- 8. Refresh marker (consumed by session-start-refresh-installer.sh) ---
+# --- 9. Refresh marker (consumed by session-start-refresh-installer.sh) ---
 # Record sha256 of *the same install.sh content that just ran* so the
 # SessionStart refresh hook can detect when main has moved forward.
 # Re-fetch from the URL because $0 is "bash" when curl|bash'd.
@@ -641,7 +690,7 @@ if [ -n "${self_sha:-}" ]; then
   log "refresh-marker: $REFRESH_MARKER (sha ${self_sha:0:12})"
 fi
 
-# --- 9. Install-done sentinel (always written very last) ---
+# --- 10. Install-done sentinel (always written very last) ---
 # Wakes session-start-install-mcp-relay.sh's grant_one() so it can read the
 # token cache hydrated in Section 5 instead of racing past it. See
 # ippoan/claude-md#38 for the race description.
