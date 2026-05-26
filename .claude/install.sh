@@ -106,7 +106,7 @@ set -eu
 # .github/workflows/stamp-install-sh-version.yml. "dev" means "running from a
 # branch / locally". CI replaces this with the commit SHA so the .install-stamp
 # file lets fresh-env verification identify exactly which install.sh ran.
-INSTALL_SH_VERSION="2026.05.16-163932-dde1d07"
+INSTALL_SH_VERSION="2026.05.26-214723-8cb6d0b"
 
 CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
 
@@ -155,8 +155,8 @@ LEGACY_HOOK_URL="${CLAUDE_HOOK_URL:-}"
 HOOK_SHAS=$(cat <<'HOOK_SHAS_EOF'
 pre-tool-claude-dir-drift.sh=bdf35f2dfb5dd360c320d84d9f8368dd585a90b4366aa30670c26e7087ccebd0
 session-start-install-hooks.sh=cf6f1e7251ec34cba9f3d823ced5bcfd744a58377269ccc5a3c6c9d4ea9f2212
-session-start-install-mcp-relay.sh=0000000000000000000000000000000000000000000000000000000000000000
-session-start-policy-reminder.sh=0000000000000000000000000000000000000000000000000000000000000000
+session-start-install-mcp-relay.sh=1b2011d270930c2ba05d5d69a6a4edef651b1a36dd858fa975ee4675191e1c7e
+session-start-policy-reminder.sh=9010a41f3c565b0aee1385da41ae360d80f6fd9decdefbb6f4ee90934d9bd340
 session-start-refresh-installer.sh=b81ad4f1e01af703be96a7d9881823e06804b46d085110bcaaf20ae3689658aa
 session-start-snapshot.sh=42ccba0438c8e20fc064c88d2ca63a1c76cdc6c63189bfce4c2b8ebf02392afb
 HOOK_SHAS_EOF
