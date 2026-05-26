@@ -87,11 +87,19 @@
 #                            session-start-install-hooks.sh 側の TTL refresh は別経路。
 #   SKIP_PLUGINS=1           1 を立てると plugins (section 7) install を skip。
 #   CLAUDE_PLUGINS           install する plugin の comma-separated list
-#                            (default: "security-guidance@anthropics/claude-code")
+#                            (default: "security-guidance@claude-code-plugins")
 #                            空文字を指定すると plugin install を skip (= SKIP_PLUGINS=1 相当)
+#                            注意: `<name>@<marketplace>` の marketplace 部分は
+#                            `claude plugin marketplace add` で登録された marketplace の
+#                            内部 name (= marketplace.json の `name` field) を使う。
+#                            github short form (`owner/repo`) ではない。例:
+#                            `anthropics/claude-code` を add すると内部 name は
+#                            `claude-code-plugins` になる (marketplace.json で定義)。
 #   CLAUDE_PLUGIN_MARKETPLACES
 #                            事前 add する marketplace の comma-separated list
 #                            (default: "anthropics/claude-code")
+#                            こちらは `claude plugin marketplace add` の引数なので
+#                            github short form (`owner/repo`) で OK。
 #   CLAUDE_INSTALL_STAMP     stamp ファイル path (default: $CLAUDE_HOME/.install-stamp)
 #                            このファイルの mtime と中身で「今 session で install.sh が
 #                            走ったか / cache 由来か」を即判定できる (fresh-env 検証用)
@@ -629,7 +637,7 @@ fi
 if [ "${SKIP_PLUGINS:-0}" = "1" ]; then
   log "skip: SKIP_PLUGINS=1"
 else
-  PLUGINS_LIST="${CLAUDE_PLUGINS-security-guidance@anthropics/claude-code}"
+  PLUGINS_LIST="${CLAUDE_PLUGINS-security-guidance@claude-code-plugins}"
   MARKETPLACES_LIST="${CLAUDE_PLUGIN_MARKETPLACES-anthropics/claude-code}"
   if [ -z "$PLUGINS_LIST" ]; then
     log "skip: CLAUDE_PLUGINS is empty"
