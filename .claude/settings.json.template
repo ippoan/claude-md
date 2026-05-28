@@ -72,12 +72,12 @@
       "mcp__72d6cc20-9f30-46e2-ac4f-cf3736a87a7f__get_workflow_run",
       "mcp__72d6cc20-9f30-46e2-ac4f-cf3736a87a7f__get_job_logs",
       "mcp__72d6cc20-9f30-46e2-ac4f-cf3736a87a7f__grep_job_logs",
-      "mcp__d5ff60b7-f356-48bf-b764-5e2040825a50__MUST_READ_FIRST_or_other_tools_will_fail",
-      "mcp__d5ff60b7-f356-48bf-b764-5e2040825a50__list_inventory",
-      "mcp__d5ff60b7-f356-48bf-b764-5e2040825a50__list_service_accounts",
-      "mcp__d5ff60b7-f356-48bf-b764-5e2040825a50__get_drift",
-      "mcp__d5ff60b7-f356-48bf-b764-5e2040825a50__get_snapshot",
-      "mcp__d5ff60b7-f356-48bf-b764-5e2040825a50__dry_run_rotate"
+      "mcp__secrets-inventory__MUST_READ_FIRST_or_other_tools_will_fail",
+      "mcp__secrets-inventory__list_inventory",
+      "mcp__secrets-inventory__list_service_accounts",
+      "mcp__secrets-inventory__get_drift",
+      "mcp__secrets-inventory__get_snapshot",
+      "mcp__secrets-inventory__dry_run_rotate"
     ]
   },
   "hooks": {
