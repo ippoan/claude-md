@@ -75,6 +75,14 @@
 #   SKIP_GITHUB_MCP_ADMIN=1  1 を立てると GITHUB_MCP_ADMIN_TOKEN_JSON が set でも admin entry を skip
 #   SKIP_MCP_RELAY=1         1 を立てると GITHUB_LOGIN が set でも github-mcp-server-rs +
 #                            ref-files-mcp-server-rs entry を skip
+#   SKIP_SECRETS_INVENTORY_MCP=1
+#                            1 を立てると secrets-inventory read-only mcpServer 登録
+#                            (Refs ippoan/secrets-inventory#61) を skip + 既存 entry 除去
+#   SECRETS_INVENTORY_MCP_URL    secrets-inventory MCP の URL
+#                            (default: https://security-inventory.ippoan.org/mcp)
+#   SECRETS_INVENTORY_AUTH_ORIGIN  read-only binding_jwt を mint する auth-worker origin
+#                            (default: https://auth.ippoan.org = prod。prod RS は
+#                            prod auth-worker に introspect するため staging 不可)
 #   AUTH_WORKER_ORIGIN       OAT-based silent bootstrap (issue ippoan/auth-worker#174)
 #                            で叩く auth-worker origin
 #                            (default: https://auth-staging.ippoan.org)
@@ -188,6 +196,13 @@ MCP_RELAY_URL_BASE="${MCP_RELAY_URL_BASE:-$GITHUB_MCP_URL_BASE}"
 GITHUB_LOGIN="${GITHUB_LOGIN:-}"
 GITHUB_MCP_TOKEN_JSON="${GITHUB_MCP_TOKEN_JSON:-}"
 REF_FILES_MCP_TOKEN_JSON="${REF_FILES_MCP_TOKEN_JSON:-}"
+# secrets-inventory MCP (Refs ippoan/secrets-inventory#61) — registered as a
+# user-level http mcpServer with a static read-only binding_jwt header so CCoW
+# sessions survive container restarts (the claude.ai web connector's OAuth token
+# is not re-established on a fresh container → "requires approval"). URL is the
+# prod RS; auth origin is prod (prod RS introspects against prod auth-worker).
+SECRETS_INVENTORY_MCP_URL="${SECRETS_INVENTORY_MCP_URL:-https://security-inventory.ippoan.org/mcp}"
+SECRETS_INVENTORY_AUTH_ORIGIN="${SECRETS_INVENTORY_AUTH_ORIGIN:-https://auth.ippoan.org}"
 
 log() { echo "[install.sh] $*"; }
 
@@ -425,6 +440,51 @@ json.dump(out, open(sys.argv[2], "w"))
     fi
   fi
 
+  # ── secrets-inventory MCP (read-only) registration (Refs ippoan/secrets-inventory#61) ──
+  # claude.ai web connector (d5ff60b7) は CCoW session 切れ後に connector OAuth
+  # token が再確立されず tool 呼び出しが "requires approval" で死ぬ。代わりに
+  # github-mcp-admin と同じく `~/.claude.json` mcpServers に http server として
+  # 登録し、grant-via-oat で mint した binding_jwt を静的 Authorization header に
+  # 焼く。install.sh は container Setup の度に走る (= 毎回 re-mint → 切れない)。
+  # secrets-inventory の binding-jwt middleware は aud 非厳格 (expectedAud=null) で
+  # github-mcp-server-rs aud の JWT を introspect 経由で受理する
+  # (secret-rotate-pipe skill と同経路)。auth origin は prod 固定 (prod RS は
+  # prod auth-worker に introspect するため)。
+  #
+  # scope は意図的に `mcp.read` のみ。secret 書き込み (rotate/create/sync/convert)
+  # を connector 経由の無人実行で開けないため。/mcp/* は CF Access bypassAll で
+  # binding_jwt の scope だけが認可境界になるので、書き込みは従来通り OAT→curl
+  # の明示経路 (secret-rotate-pipe) に限定する。
+  secrets_inventory_jwt_for_py=""
+  if [ "${SKIP_SECRETS_INVENTORY_MCP:-0}" = "1" ]; then
+    secrets_inventory_disabled_for_py="1"
+  else
+    secrets_inventory_disabled_for_py=""
+  fi
+  if [ "${SKIP_MCP:-0}" != "1" ] \
+    && [ "${SKIP_SECRETS_INVENTORY_MCP:-0}" != "1" ] \
+    && [ "${SKIP_OAT_BINDING:-0}" != "1" ] \
+    && [ -r "/home/claude/.claude/remote/.oauth_token" ]; then
+    si_oat=$(tr -d '[:space:]' < /home/claude/.claude/remote/.oauth_token)
+    if [ -n "$si_oat" ]; then
+      si_tmp=$(mktemp); chmod 600 "$si_tmp"
+      si_http=$(curl -sS -o "$si_tmp" -w "%{http_code}" --max-time 10 \
+        -X POST "${SECRETS_INVENTORY_AUTH_ORIGIN}/mcp/pair/grant-via-oat" \
+        -H "Authorization: Bearer $si_oat" \
+        -H "Content-Type: application/json" \
+        -d '{"aud":"github-mcp-server-rs","scope":"mcp.read"}' \
+        2>/dev/null || echo "000")
+      if [ "$si_http" = "200" ]; then
+        secrets_inventory_jwt_for_py=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("binding_jwt",""))' "$si_tmp" 2>/dev/null || echo "")
+        log "MCP: secrets-inventory read-only binding_jwt minted (Refs ippoan/secrets-inventory#61)"
+      else
+        # transient failure (404 未 bind / 000 network 等) → 既存 entry は触らない
+        log "MCP: secrets-inventory grant-via-oat status=$si_http (entry left as-is)"
+      fi
+      rm -f "$si_tmp"
+    fi
+  fi
+
   # mcp_relay_url_base_for_py が空のまま python に渡ると default
   # ($GITHUB_MCP_URL_BASE = https://mcp.ippoan.org prod) になる。
   : "${mcp_relay_url_base_for_py:=$MCP_RELAY_URL_BASE}"
@@ -436,6 +496,9 @@ json.dump(out, open(sys.argv[2], "w"))
   MCP_RELAY_URL="$mcp_relay_url_for_py" \
   GITHUB_MCP_TOKEN_JSON="$github_mcp_token_for_py" \
   REF_FILES_MCP_TOKEN_JSON="$ref_files_mcp_token_for_py" \
+  SECRETS_INVENTORY_MCP_JWT="$secrets_inventory_jwt_for_py" \
+  SECRETS_INVENTORY_MCP_URL="$SECRETS_INVENTORY_MCP_URL" \
+  SECRETS_INVENTORY_MCP_DISABLED="$secrets_inventory_disabled_for_py" \
   python3 - "$CLAUDE_JSON_DEST" "$CC_RELAY_MCP_URL" <<'PY'
 import json, os, sys
 
@@ -525,6 +588,27 @@ else:
     if removed:
         mcp_relay_msg = f"removed stale mcp-relay entries ({', '.join(removed)}; MCP_RELAY_LOGIN not set)"
 
+# secrets-inventory (Refs ippoan/secrets-inventory#61): read-only http mcpServer
+# with a static binding_jwt header minted above. Re-written every container Setup
+# so CCoW sessions survive restarts. jwt 空 + 明示 disable のときだけ entry 除去;
+# mint が transient に失敗した run では既存 entry を温存する (= 切れさせない)。
+si_jwt = os.environ.get("SECRETS_INVENTORY_MCP_JWT", "")
+si_url = os.environ.get(
+    "SECRETS_INVENTORY_MCP_URL", "https://security-inventory.ippoan.org/mcp"
+)
+si_disabled = os.environ.get("SECRETS_INVENTORY_MCP_DISABLED", "") == "1"
+si_msg = None
+if si_jwt:
+    servers["secrets-inventory"] = {
+        "type": "http",
+        "url": si_url,
+        "headers": {"Authorization": f"Bearer {si_jwt}"},
+    }
+    si_msg = f"registered secrets-inventory ({si_url}, read-only)"
+elif si_disabled:
+    if servers.pop("secrets-inventory", None) is not None:
+        si_msg = "removed secrets-inventory entry (SKIP_SECRETS_INVENTORY_MCP=1)"
+
 tmp = path + ".tmp"
 with open(tmp, "w") as f:
     json.dump(data, f, indent=2)
@@ -534,6 +618,8 @@ if admin_msg:
     print(f"[install.sh] MCP: {admin_msg}")
 if mcp_relay_msg:
     print(f"[install.sh] MCP: {mcp_relay_msg}")
+if si_msg:
+    print(f"[install.sh] MCP: {si_msg}")
 PY
 fi
 
