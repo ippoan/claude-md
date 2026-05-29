@@ -6,6 +6,27 @@
 [ippoan/claude-md](https://github.com/ippoan/claude-md) の `CLAUDE.md.template`
 から生成されている — 共通項を直すときは template を更新する。
 
+## 作業ライフサイクル (issue → PR → push → fin) ★徹底
+
+すべてのタスクはこの順序で進める。途中の段階を飛ばさない。
+
+1. **issue** — 着手前に必ず issue を立てる (または既存 issue を特定する)。
+   issue 番号で branch を切る (`<issue-number>-<type>-<short-description>`)。
+   issue 無しで `claude/...` branch のまま実装に入らない。
+   - **計画 (plan / design) の作成・更新も PR で行う。** 計画は会話や issue 本文の
+     口頭で済ませず、repo 内ファイル (例: `docs/plan-<topic>.md`) として起こし、
+     その追加・更新を PR レビューに乗せて履歴を残す。計画が固まってから実装に入る。
+2. **PR** — 実装 / 計画が一段落したら PR を作る。body に `Refs #N` で issue を紐付ける
+   (`Closes/Fixes/Resolves` は使わない、下記 §「GitHub 自動化」)。PR 作成の可否は
+   §「PR 作成前にユーザーに確認」に従う。
+3. **push** — commit して branch に push。PR 作成と同じ turn で
+   `mcp__github__subscribe_pr_activity` を呼び CI を watch する (§「PR 作成後の CI 監視」)。
+   `sleep` / polling はせずターンを終える。
+4. **fin** — CI green → (auto-)merge で `main` 反映 → 完了。issue は auto-close せず、
+   release tag 時に [ci-dashboard](https://github.com/ippoan/ci-dashboard) で目視 close する。
+
+各段階の詳細ルールは以下の該当セクションを参照。
+
 ## まず読むもの
 
 - [`README.md`](./README.md) — `<<REPO_NAME>>` とは何か、ざっくり。
