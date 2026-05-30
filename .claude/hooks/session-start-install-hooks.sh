@@ -1,5 +1,5 @@
 #!/bin/bash
-# SessionStart hook: install yhonda-ohishi/claude-skills + ippoan/claude-hooks
+# SessionStart hook: install ippoan/claude-skills + ippoan/claude-hooks
 # (via the CCoW per-session git proxy) and anthropics/skills (via the
 # proxy with a github.com fallback) — all symlinked into ~/.claude/skills.
 #
@@ -13,13 +13,13 @@
 #
 # CCoW container 内では attached repo が
 #   http://local_proxy@127.0.0.1:<port>/git/<owner>/<repo>
-# 経由で clone されており、この proxy は private repo (yhonda-ohishi/* 含む)
-# にも access 可能なため、attached repo の .git/config から proxy URL を
-# 抜き出して claude-skills / claude-hooks の bootstrap に流用する。
+# 経由で clone されており、この proxy は ippoan/* repo にも access 可能
+# なため、attached repo の .git/config から proxy URL を抜き出して
+# claude-skills / claude-hooks の bootstrap に流用する。
 # 同じ proxy 経由で anthropics/skills (public) も取得する。proxy が
 # 公開 repo を許可しない構成のケースに備え、github.com 直 URL に fallback。
 #
-# Conflict policy: yhonda-ohishi/claude-skills が先に処理され名前衝突で勝つ。
+# Conflict policy: ippoan/claude-skills が先に処理され名前衝突で勝つ。
 # anthropics/skills は空きスロットだけを埋める (user override を温存)。
 #
 # 出力: SessionStart hook spec の JSON (additionalContext で結果を inject)
@@ -105,12 +105,12 @@ clone_or_pull() {
   fi
 }
 
-clone_or_pull yhonda-ohishi claude-skills
+clone_or_pull ippoan        claude-skills
 clone_or_pull ippoan        claude-hooks
 clone_or_pull anthropics    skills        anthropic-skills "$ANTHROPIC_DIRECT_URL"
 
 # 3. SKILL.md を symlink (既存の非 symlink = user 手書きは触らない)
-#    Sources are processed in order; yhonda-ohishi/claude-skills owns its
+#    Sources are processed in order; ippoan/claude-skills owns its
 #    slots (re-linked even if a symlink already exists), anthropics/skills
 #    only fills slots that are still empty.
 skill_count=0

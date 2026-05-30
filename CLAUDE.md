@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-このリポジトリは Claude Code on the Web (CCoW) 向けの **user-level bootstrap (`install.sh` + SessionStart/PreToolUse hooks)** と、5 つの consumer repo (`ippoan/{cc-relay,auth-worker,ci-dashboard}`, `yhonda-ohishi/{claude-hooks,claude-skills}`) 用の **`CLAUDE.md` 共通テンプレート** を配布する。
+このリポジトリは Claude Code on the Web (CCoW) 向けの **user-level bootstrap (`install.sh` + SessionStart/PreToolUse hooks)** と、5 つの consumer repo (`ippoan/{cc-relay,auth-worker,ci-dashboard,claude-hooks,claude-skills}`) 用の **`CLAUDE.md` 共通テンプレート** を配布する。
 
 詳細仕様は [`README.md`](./README.md) を読む。ここには Claude が編集作業の前に押さえておくべきものだけを書く。
 
