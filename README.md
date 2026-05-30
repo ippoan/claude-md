@@ -2,7 +2,7 @@
 
 Claude Code 向け `CLAUDE.md` の共通テンプレート。
 
-`ippoan/{cc-relay,auth-worker,ci-dashboard}` および `yhonda-ohishi/{claude-hooks,claude-skills}` 5 つの repo の `CLAUDE.md` を読み比べた結果、半分以上は同じセクション構造で書かれていることが分かった。本 repo はその共通部分を 1 つの template に集約し、各 repo の `CLAUDE.md` を再生成可能な形にする。
+`ippoan/{cc-relay,auth-worker,ci-dashboard}` および `ippoan/claude-hooks + yhonda-ohishi/claude-skills` 5 つの repo の `CLAUDE.md` を読み比べた結果、半分以上は同じセクション構造で書かれていることが分かった。本 repo はその共通部分を 1 つの template に集約し、各 repo の `CLAUDE.md` を再生成可能な形にする。
 
 ## このリポジトリの構成
 
@@ -30,7 +30,7 @@ Claude Code 向け `CLAUDE.md` の共通テンプレート。
 | 2 | **まず読むもの** | 新規 contributor が 5 分で全体像を掴めるリンク集 (README / ARCHITECTURE / docs/ / Project board) |
 | 3 | **ブランチ運用 / Worktree** | branch 命名規則、worktree の使い分け、`main` 直 push 禁止 |
 | 4 | **ビルド / テスト / lint** | PR 出す前に手元で叩く command 一覧 (CI と同じものを並べる) |
-| 5 | **Hooks** | `.claude/settings.json` から呼ぶ hook の有無、versioning 方針、`yhonda-ohishi/claude-hooks` への依存 |
+| 5 | **Hooks** | `.claude/settings.json` から呼ぶ hook の有無、versioning 方針、`ippoan/claude-hooks` への依存 |
 | 6 | **GitHub 自動化** | auto-merge yml、Branch protection の Required status checks、PR template、`Refs #N` vs `Closes #N` |
 | 7 | **やってはいけないこと** | force push、直 push、secret commit、未検証 macOS/Win 対応コード追加 等 |
 
@@ -137,7 +137,7 @@ claude-skills / claude-hooks を取得する処理を **SessionStart hook に分
 hook 内部処理:
 
 1. `/home/user/*/` を走査して `.git/config` から `http://local_proxy@127.0.0.1:<port>/git` 部分を抽出
-2. その proxy URL を base に `git clone --depth 1 …/yhonda-ohishi/{claude-skills,claude-hooks}` を `~/.claude/sources/` に展開 (既存なら `fetch --depth 1 + reset --hard`)
+2. その proxy URL を base に `git clone --depth 1 …/yhonda-ohishi/claude-skills + ippoan/claude-hooks` を `~/.claude/sources/` に展開 (既存なら `fetch --depth 1 + reset --hard`)
 3. `~/.claude/sources/claude-skills/<name>/SKILL.md` を `~/.claude/skills/<name>` に symlink (既存の非 symlink = user 手書きは触らない)
 4. TTL (`CLAUDE_HOOKS_INSTALL_TTL`, default 3600s) 内は network sync を skip。symlink 更新だけ実施
 5. proxy URL を見つけられない / clone 失敗時は fail-open (additionalContext にエラー記録、session は継続)
@@ -391,4 +391,4 @@ bootstrap の段階 1 で install される user-level template。`~/.claude/set
 ## 関連
 
 - 検証セッションのきっかけ: [ippoan/cc-relay#37](https://github.com/ippoan/cc-relay/issues/37) Phase F 検証中に「5 repo の CLAUDE.md 揺らぎが大きすぎる」と判明
-- 参照元 repo: `ippoan/{cc-relay,auth-worker,ci-dashboard}`、`yhonda-ohishi/{claude-hooks,claude-skills}`
+- 参照元 repo: `ippoan/{cc-relay,auth-worker,ci-dashboard}`、`ippoan/claude-hooks + yhonda-ohishi/claude-skills`
