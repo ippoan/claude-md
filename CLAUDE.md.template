@@ -69,7 +69,7 @@ CI (`.github/workflows/ci.yml` 等) は `main` への PR ごとに上を matrix 
 
 `.claude/settings.json` から呼び出すシェルスクリプトを使う場合の方針:
 
-- repo 内 `.claude/hooks/` 配下に置くか、`yhonda-ohishi/claude-hooks` の
+- repo 内 `.claude/hooks/` 配下に置くか、`ippoan/claude-hooks` の
   centralised hook を delegate 呼び出しする (推奨)
 - versioning は sha256 ピン留め or release tag 参照
 - **Web-only な hook は `CLAUDE_CODE_REMOTE=true` 判定でローカルを skip**

@@ -1,5 +1,5 @@
 #!/bin/bash
-# SessionStart hook: install yhonda-ohishi/{claude-skills,claude-hooks}
+# SessionStart hook: install yhonda-ohishi/claude-skills + ippoan/claude-hooks
 # (via the CCoW per-session git proxy) and anthropics/skills (via the
 # proxy with a github.com fallback) — all symlinked into ~/.claude/skills.
 #
@@ -106,7 +106,7 @@ clone_or_pull() {
 }
 
 clone_or_pull yhonda-ohishi claude-skills
-clone_or_pull yhonda-ohishi claude-hooks
+clone_or_pull ippoan        claude-hooks
 clone_or_pull anthropics    skills        anthropic-skills "$ANTHROPIC_DIRECT_URL"
 
 # 3. SKILL.md を symlink (既存の非 symlink = user 手書きは触らない)
