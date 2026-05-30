@@ -108,6 +108,11 @@
             "type": "command",
             "command": "/root/.claude/hooks/session-start-policy-reminder.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/root/.claude/sources/claude-hooks/session-start-stale-skills-check.sh",
+            "timeout": 10
           }
         ]
       }
