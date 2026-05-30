@@ -632,7 +632,7 @@ log "done"
 # session-start-install-hooks.sh は attached repo の `.git/config` から port を
 # discover するが、Setup time にはそれが無い。代わりに /proc/net/tcp で
 # 127.0.0.1 LISTEN port を列挙し、各 port に
-# `/git/yhonda-ohishi/claude-skills/info/refs?service=git-upload-pack` を probe
+# `/git/ippoan/claude-skills/info/refs?service=git-upload-pack` を probe
 # して 200 を返した port を proxy とみなす。
 #
 # 既存 SessionStart hook (`session-start-install-hooks.sh`) は TTL 1h で
@@ -649,7 +649,7 @@ else
   while IFS= read -r _p; do
     [ -z "$_p" ] && continue
     if curl -fsS --max-time 3 -o /dev/null \
-        "http://local_proxy@127.0.0.1:${_p}/git/yhonda-ohishi/claude-skills/info/refs?service=git-upload-pack" \
+        "http://local_proxy@127.0.0.1:${_p}/git/ippoan/claude-skills/info/refs?service=git-upload-pack" \
         2>/dev/null; then
       SKILLS_PROXY="http://local_proxy@127.0.0.1:${_p}/git"
       break
@@ -676,7 +676,7 @@ else
       return 1
     }
 
-    clone_via_proxy yhonda-ohishi claude-skills "$PRIV_SRC" \
+    clone_via_proxy ippoan claude-skills "$PRIV_SRC" \
       || log "warn: claude-skills clone via proxy failed (no public fallback)"
     clone_via_proxy anthropics skills "$PUB_SRC" "https://github.com/anthropics/skills.git" \
       || log "warn: anthropics/skills clone failed (proxy + github fallback)"

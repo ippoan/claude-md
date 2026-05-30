@@ -2,7 +2,7 @@
 
 Claude Code 向け `CLAUDE.md` の共通テンプレート。
 
-`ippoan/{cc-relay,auth-worker,ci-dashboard}` および `ippoan/claude-hooks + yhonda-ohishi/claude-skills` 5 つの repo の `CLAUDE.md` を読み比べた結果、半分以上は同じセクション構造で書かれていることが分かった。本 repo はその共通部分を 1 つの template に集約し、各 repo の `CLAUDE.md` を再生成可能な形にする。
+`ippoan/{cc-relay,auth-worker,ci-dashboard,claude-hooks,claude-skills}` 5 つの repo の `CLAUDE.md` を読み比べた結果、半分以上は同じセクション構造で書かれていることが分かった。本 repo はその共通部分を 1 つの template に集約し、各 repo の `CLAUDE.md` を再生成可能な形にする。
 
 ## このリポジトリの構成
 
@@ -131,13 +131,13 @@ CI workflow `.github/workflows/stamp-install-sh-version.yml` が main への pus
 claude-skills / claude-hooks を取得する処理を **SessionStart hook に分離した理由**:
 
 - Setup script 時点では attached repo が clone される前なので、CCoW の git proxy URL (`http://local_proxy@127.0.0.1:<port>/git/…`) を discover できない
-- raw.githubusercontent.com を anonymous で叩いても private repo (yhonda-ohishi/*) は 404 になる
-- SessionStart hook なら毎 session attached repo の `.git/config` から proxy URL を抜き出せる。そして CCoW の scoped credential が yhonda-ohishi/* にも valid
+- raw.githubusercontent.com を anonymous で叩いても private repo (ippoan/*) は 404 になる
+- SessionStart hook なら毎 session attached repo の `.git/config` から proxy URL を抜き出せる。そして CCoW の scoped credential が ippoan/* にも valid
 
 hook 内部処理:
 
 1. `/home/user/*/` を走査して `.git/config` から `http://local_proxy@127.0.0.1:<port>/git` 部分を抽出
-2. その proxy URL を base に `git clone --depth 1 …/yhonda-ohishi/claude-skills + ippoan/claude-hooks` を `~/.claude/sources/` に展開 (既存なら `fetch --depth 1 + reset --hard`)
+2. その proxy URL を base に `git clone --depth 1 …/ippoan/claude-skills + ippoan/claude-hooks` を `~/.claude/sources/` に展開 (既存なら `fetch --depth 1 + reset --hard`)
 3. `~/.claude/sources/claude-skills/<name>/SKILL.md` を `~/.claude/skills/<name>` に symlink (既存の非 symlink = user 手書きは触らない)
 4. TTL (`CLAUDE_HOOKS_INSTALL_TTL`, default 3600s) 内は network sync を skip。symlink 更新だけ実施
 5. proxy URL を見つけられない / clone 失敗時は fail-open (additionalContext にエラー記録、session は継続)
@@ -391,4 +391,4 @@ bootstrap の段階 1 で install される user-level template。`~/.claude/set
 ## 関連
 
 - 検証セッションのきっかけ: [ippoan/cc-relay#37](https://github.com/ippoan/cc-relay/issues/37) Phase F 検証中に「5 repo の CLAUDE.md 揺らぎが大きすぎる」と判明
-- 参照元 repo: `ippoan/{cc-relay,auth-worker,ci-dashboard}`、`ippoan/claude-hooks + yhonda-ohishi/claude-skills`
+- 参照元 repo: `ippoan/{cc-relay,auth-worker,ci-dashboard,claude-hooks,claude-skills}`
