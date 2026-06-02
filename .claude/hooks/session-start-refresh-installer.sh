@@ -7,6 +7,17 @@
 # いれば再 run する。これで user は CCoW Setup script を初回 paste した後
 # 二度と編集しないで済む。
 #
+# 比較する sha は install.sh 単独ではなく **install.sh ++ settings.json.template
+# の合成 sha**。install.sh は settings.json.template を展開するだけで template の
+# 中身を自身に埋め込まないため、template だけ変えた PR (新規 hook の登録や env
+# 追加。例: claude-md #64/#65) は install.sh の sha を変えず、warm container に
+# 伝播しない (issue ippoan/claude-hooks#8)。template を合成 sha に畳み込むことで
+# client 側でもこれを検知する。hook の *中身* の変更は install.sh が埋め込む
+# HOOK_SHAS block 経由で install.sh の sha に既に反映されるので、合成には
+# install.sh + template の 2 つで十分 (hooks は推移的にカバーされる)。
+# stamp-install-sh-version.yml の path filter にも template を追加してあり
+# (server 側の対策)、本 hook の合成 sha はその belt-and-suspenders。
+#
 # 即時反映されるもの (file は session 中の hook 呼び出し時に毎回 disk 読み):
 #   - ~/.claude/hooks/*.sh
 #   - ~/.claude/skills/ + sources/
@@ -25,14 +36,20 @@
 #
 # env override:
 #   CLAUDE_HOME              ~/.claude path (default: $HOME/.claude)
-#   CLAUDE_MD_INSTALL_URL    install.sh URL (default: main raw URL)
-#   CLAUDE_REFRESH_MARKER    last-installed sha marker path
+#   CLAUDE_MD_BASE_URL       claude-md raw base URL (default: main raw base)
+#                            INSTALL/TEMPLATE URL 未指定時の派生元
+#   CLAUDE_MD_INSTALL_URL    install.sh URL (default: $CLAUDE_MD_BASE_URL/.claude/install.sh)
+#   CLAUDE_MD_TEMPLATE_URL   settings.json.template URL
+#                            (default: $CLAUDE_MD_BASE_URL/.claude/settings.json.template)
+#   CLAUDE_REFRESH_MARKER    last-installed 合成 sha marker path
 #                            (default: $CLAUDE_HOME/.refresh-installer-marker)
 #   CLAUDE_REFRESH_TTL       network check skip TTL 秒 (default: 300 = 5 min)
 set -u
 
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
-INSTALLER_URL="${CLAUDE_MD_INSTALL_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main/.claude/install.sh}"
+BASE_URL="${CLAUDE_MD_BASE_URL:-https://raw.githubusercontent.com/ippoan/claude-md/main}"
+INSTALLER_URL="${CLAUDE_MD_INSTALL_URL:-$BASE_URL/.claude/install.sh}"
+TEMPLATE_URL="${CLAUDE_MD_TEMPLATE_URL:-$BASE_URL/.claude/settings.json.template}"
 MARKER="${CLAUDE_REFRESH_MARKER:-$CLAUDE_HOME/.refresh-installer-marker}"
 TTL="${CLAUDE_REFRESH_TTL:-300}"
 
@@ -51,14 +68,24 @@ if [ -f "$MARKER" ]; then
 fi
 
 TMPFILE=$(mktemp 2>/dev/null || echo "/tmp/refresh-installer-$$.sh")
-trap 'rm -f "$TMPFILE"' EXIT
+TMPL_FILE=$(mktemp 2>/dev/null || echo "/tmp/refresh-installer-tmpl-$$.json")
+trap 'rm -f "$TMPFILE" "$TMPL_FILE"' EXIT
 
 if ! curl -fsSL --max-time 15 "$INSTALLER_URL" -o "$TMPFILE" 2>/dev/null; then
   emit "refresh-installer: fetch failed ($INSTALLER_URL) — keep current state"
   exit 0
 fi
+if ! curl -fsSL --max-time 15 "$TEMPLATE_URL" -o "$TMPL_FILE" 2>/dev/null; then
+  emit "refresh-installer: template fetch failed ($TEMPLATE_URL) — keep current state"
+  exit 0
+fi
 
-new_sha=$(sha256sum "$TMPFILE" 2>/dev/null | awk '{print $1}')
+# Composite marker: sha256 over install.sh ++ settings.json.template (in that
+# byte order). Catches template-only changes (new hook registration / env
+# additions) that leave install.sh's own sha unchanged. The concatenation
+# order MUST match install.sh's Section 9 marker write or every session would
+# spuriously re-run install.sh.
+new_sha=$(cat "$TMPFILE" "$TMPL_FILE" 2>/dev/null | sha256sum 2>/dev/null | awk '{print $1}')
 if [ -z "$new_sha" ]; then
   emit "refresh-installer: could not compute sha — keep current state"
   exit 0
@@ -71,7 +98,7 @@ fi
 
 if [ "$new_sha" = "$last_sha" ]; then
   touch "$MARKER"
-  emit "refresh-installer: install.sh unchanged (sha ${new_sha:0:12})"
+  emit "refresh-installer: install.sh + template unchanged (sha ${new_sha:0:12})"
   exit 0
 fi
 

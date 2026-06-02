@@ -773,16 +773,27 @@ STAMP
 log "stamp: $STAMP_DEST ($STAMP_NOW_ISO, version=$INSTALL_SH_VERSION)"
 
 # --- 9. Refresh marker (consumed by session-start-refresh-installer.sh) ---
-# Record sha256 of *the same install.sh content that just ran* so the
-# SessionStart refresh hook can detect when main has moved forward.
-# Re-fetch from the URL because $0 is "bash" when curl|bash'd.
+# Record a composite sha256 of *the same install.sh + settings.json.template
+# content this install deploys* so the SessionStart refresh hook can detect
+# when main has moved forward — including template-only changes (new hook
+# registration / env additions) that leave install.sh's own sha unchanged
+# (issue ippoan/claude-hooks#8). Re-fetch from the URLs because $0 is "bash"
+# when curl|bash'd and SETTINGS_DEST may have been skipped. Concatenation order
+# (install.sh then template) MUST match session-start-refresh-installer.sh, or
+# every warm session would spuriously re-run install.sh.
 REFRESH_MARKER="${CLAUDE_REFRESH_MARKER:-$CLAUDE_HOME/.refresh-installer-marker}"
 REFRESH_URL="${CLAUDE_MD_INSTALL_URL:-$CLAUDE_MD_BASE_URL/.claude/install.sh}"
-self_sha=$(curl -fsSL --max-time 15 "$REFRESH_URL" 2>/dev/null | sha256sum 2>/dev/null | awk '{print $1}' || true)
-if [ -n "${self_sha:-}" ]; then
-  echo "$self_sha" > "$REFRESH_MARKER"
-  log "refresh-marker: $REFRESH_MARKER (sha ${self_sha:0:12})"
+REFRESH_INSTALL_TMP=$(mktemp 2>/dev/null || echo "/tmp/install-marker-$$.sh")
+REFRESH_TMPL_TMP=$(mktemp 2>/dev/null || echo "/tmp/install-marker-tmpl-$$.json")
+if curl -fsSL --max-time 15 "$REFRESH_URL" -o "$REFRESH_INSTALL_TMP" 2>/dev/null \
+  && curl -fsSL --max-time 15 "$TEMPLATE_URL" -o "$REFRESH_TMPL_TMP" 2>/dev/null; then
+  self_sha=$(cat "$REFRESH_INSTALL_TMP" "$REFRESH_TMPL_TMP" 2>/dev/null | sha256sum 2>/dev/null | awk '{print $1}' || true)
+  if [ -n "${self_sha:-}" ]; then
+    echo "$self_sha" > "$REFRESH_MARKER"
+    log "refresh-marker: $REFRESH_MARKER (composite sha ${self_sha:0:12})"
+  fi
 fi
+rm -f "$REFRESH_INSTALL_TMP" "$REFRESH_TMPL_TMP"
 
 # --- 10. Install-done sentinel (always written very last) ---
 # Wakes session-start-install-mcp-relay.sh's grant_one() so it can read the
