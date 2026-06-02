@@ -15,6 +15,19 @@ name: stamp install.sh version
 # Without this, hook-only PRs (e.g. #16) silently leave cached
 # ~/.claude environments running the old hook.
 #
+# Template / user-memory drift detection: paths also trigger on
+# .claude/settings.json.template and .claude/user-memory.md. install.sh
+# deploys those two files (settings.json + ~/.claude/CLAUDE.md), but their
+# content is NOT embedded in install.sh, so a template-only PR (e.g. the
+# coverage-hook registration in #64 / the CLAUDE_SKILL_COVERAGE_IGNORE env
+# in #65) leaves install.sh's sha unchanged → refresh-installer concludes
+# "unchanged" → cached ~/.claude environments never pick up the new hook
+# registration or env (see issue ippoan/claude-hooks#8). Triggering the
+# stamp on these paths re-stamps INSTALL_SH_VERSION, which changes
+# install.sh's sha and forces refresh-installer to re-run install.sh.
+# (session-start-refresh-installer.sh also folds the template sha into its
+# marker as a client-side belt-and-suspenders for the same gap.)
+#
 # Loop prevention: the workflow conditional skips its own stamping commits
 # (identified by the `chore(install): stamp INSTALL_SH_VERSION=` prefix it
 # always uses), so the stamping commit does not retrigger itself. We do NOT
@@ -45,6 +58,8 @@ on:
     paths:
       - .claude/install.sh
       - .claude/hooks/**
+      - .claude/settings.json.template
+      - .claude/user-memory.md
 
 permissions:
   contents: write
