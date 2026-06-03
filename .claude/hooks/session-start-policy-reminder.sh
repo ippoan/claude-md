@@ -63,6 +63,15 @@ read -r -d '' POLICY <<'POLICY_EOF' || true
    理由: file 全文を JSON param で送ると ~30× token 消費 (実害: secrets-inventory-gcp#23 で
    ~100KB / 25K token 浪費)。
 
+4. **秘密の値 (API key / token / shared secret) を LLM context・plain env・tool-call param に載せない。**
+   `secret-inject` skill を使う:
+   `openssl rand -hex 32 | bash ~/.claude/skills/secret-inject/scripts/inject-secret.sh NAME --targets gcp,github`
+   値は shell→curl(--data-binary)→worker→Secret Manager だけを通り、context/log/response を一切経由しない。
+   - `create_secret` / `rotate_secret` MCP tool は value を param に載せる = **禁止** (= 値が会話に残る)。
+   - 自分で `openssl rand | cat` して値を読む / Cloud Run の plain env `value:` に直書きするのも禁止。
+     Cloud Run は **secretKeyRef** (Secret Manager 参照) で渡す。
+   理由: 値が会話/log に出た時点で compromised → 全数 rotate が必要。実害多数 (本 reminder の追加契機)。
+
 これらは reminder。違反したら user が即指摘するので、その時に修正で OK。
 POLICY_EOF
 
