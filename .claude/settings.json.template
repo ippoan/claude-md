@@ -138,6 +138,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "mcp__github__create_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.claude/sources/claude-hooks/pr-refs-link-guard.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
