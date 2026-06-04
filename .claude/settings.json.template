@@ -170,6 +170,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.claude/sources/claude-hooks/npm-ippoan-local-fallback.sh",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
