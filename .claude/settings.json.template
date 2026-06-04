@@ -146,6 +146,11 @@
             "type": "command",
             "command": "/root/.claude/sources/claude-hooks/pr-refs-link-guard.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "/root/.claude/sources/claude-hooks/pre-pr-rebase-guard.sh",
+            "timeout": 15
           }
         ]
       }
