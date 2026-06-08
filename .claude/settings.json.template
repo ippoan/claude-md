@@ -136,6 +136,11 @@
             "type": "command",
             "command": "/root/.claude/sources/claude-hooks/clone-guard.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/root/.claude/sources/claude-hooks/pr-push-allowlist-guard.sh",
+            "timeout": 5
           }
         ]
       },
