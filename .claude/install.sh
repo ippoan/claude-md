@@ -11,6 +11,7 @@
 #      + (optional) github-mcp-admin entry を $GITHUB_MCP_ADMIN_TOKEN_JSON 経由で登録
 #   6. skills bootstrap                                 (CCoW git proxy 経由で claude-skills clone)
 #   7. plugins                                          (anthropics/claude-code marketplace の security-guidance を install)
+#   7.5 universal-ctags                                 (on-demand symbol 抽出用の binary pre-install)
 #   8. ~/.claude/.install-stamp                         (検証用 epoch+ISO+version+hooks)
 #   9. ~/.claude/.refresh-installer-marker              (refresh hook が使う sha)
 #
@@ -94,6 +95,7 @@
 #                            CCoW `/` menu populate 用の seed が要らない時のみ。
 #                            session-start-install-hooks.sh 側の TTL refresh は別経路。
 #   SKIP_PLUGINS=1           1 を立てると plugins (section 7) install を skip。
+#   SKIP_CTAGS=1             1 を立てると universal-ctags install (section 7.5) を skip。
 #   CLAUDE_PLUGINS           install する plugin の comma-separated list
 #                            (default: "security-guidance@claude-code-plugins")
 #                            空文字を指定すると plugin install を skip (= SKIP_PLUGINS=1 相当)
@@ -750,6 +752,25 @@ else
         log "warn: plugin install failed for $_plg (continuing)"
       fi
     done
+  fi
+fi
+
+# --- 7.5. universal-ctags (on-demand symbol 抽出用の pre-install) ---
+# cross-repo-symbol-index skill の運用 (「index は保存しない。symbol が要る時に
+# その場でローカル ctags」) のため、binary だけ先に入れて使う時の apt 待ちを無くす。
+# index の事前生成はしない (注入不能・session 中に stale 化・on-demand と 0.3 秒差)。
+# Refs ippoan/claude-md#76 タスク 6。network 不通 / 権限なしでも fail-open。
+if [ "${SKIP_CTAGS:-0}" = "1" ]; then
+  log "skip: SKIP_CTAGS=1"
+elif command -v ctags >/dev/null 2>&1; then
+  log "ctags: already installed"
+else
+  if command -v apt-get >/dev/null 2>&1 \
+      && { apt-get install -y -qq --no-install-recommends universal-ctags \
+           || sudo -n apt-get install -y -qq --no-install-recommends universal-ctags; } >/dev/null 2>&1; then
+    log "ctags: installed universal-ctags"
+  else
+    log "warn: ctags install failed (continuing — on-demand 利用時に手動 install)"
   fi
 fi
 
