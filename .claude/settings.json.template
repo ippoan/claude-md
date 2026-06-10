@@ -191,6 +191,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.claude/sources/claude-hooks/stop-tool-syntax-check.sh",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
