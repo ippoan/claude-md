@@ -389,6 +389,37 @@ bootstrap の段階 1 で install される user-level template。`~/.claude/set
 
 本 template の allow list は [ippoan/cc-relay#37](https://github.com/ippoan/cc-relay/issues/37) の Phase F acceptance session ([cse_…6bEte](https://github.com/ippoan/cc-relay/issues/37#issuecomment-4456995515)) で実際に叩いた tool から派生。新しい tool を追加する場合は同 issue にリンクして PR を切る。
 
+## モデルルーティング方針 (CCoW)
+
+CCoW セッションは以下のモデル分担を前提に運用する。
+
+- **メインスレッド: Claude Fable 5** — 計画 (planning) とレビュー (review) を担当
+- **サブエージェント: Claude Opus 4.8** — 実装・コーディングを担当
+
+### 動作ルール
+
+- 計画とレビューはメインスレッド (Fable) で行う。
+- 実装作業はサブエージェントに委譲する (`CLAUDE_CODE_SUBAGENT_MODEL=opus` により Opus で実行される)。
+- サブエージェントのネストは depth=5 まで (実験的機能)。並列化ではなくコンテキスト管理目的で使う。
+- **最小権限**: Task (Agent) ツールはオーケストレーター用エージェントにのみ付与する。末端の coder / tester / reviewer エージェントには Task を渡さない (無制限な spawn を防ぐ)。
+
+### セットアップ (環境変数)
+
+**CCoW の環境変数ダイアログ** (Environment → Environment variables) に設定して運用する:
+
+| 変数 | 値 | 用途 |
+|---|---|---|
+| `CLAUDE_CODE_SUBAGENT_MODEL` | `opus` | 全サブエージェントを Opus に固定 (各 agent frontmatter の `model` を上書きし、ネストされたサブエージェントにも伝播する) |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | `claude-opus-4-8` | `opus` エイリアスが解決するバージョンを固定 |
+
+- メインスレッドの Fable は env では指定できない (効かない)。**CCoW タスク UI のモデルセレクターで Fable を選択**する。
+- これらは Claude Code runtime の env であり、install.sh の env override (前掲の表) とは別系統。`.claude/settings.json` の `env` ブロックでも設定可能だが、運用窓口は CCoW の環境変数ダイアログに統一する。
+
+### 注意
+
+- Fable 5 は cybersecurity / biology 系の内容をセーフティ分類器が検知すると、自動で Opus にフォールバックする。セキュリティ関連のコードや記述を含むリポジトリでは、メインスレッドが意図せず Opus に切り替わることがある (初回リクエストで CLAUDE.md と git status を読む時点で発火しうる)。
+- `CLAUDE_CODE_SUBAGENT_MODEL=opus` を設定している間は、サブエージェント側で Fable を使う構成はできない (すべて Opus に潰れる)。
+
 ## 関連
 
 - 検証セッションのきっかけ: [ippoan/cc-relay#37](https://github.com/ippoan/cc-relay/issues/37) Phase F 検証中に「5 repo の CLAUDE.md 揺らぎが大きすぎる」と判明
