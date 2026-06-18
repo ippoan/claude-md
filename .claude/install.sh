@@ -9,6 +9,8 @@
 #   4. cc-relay shallow clone                           (ippoan/cc-relay)
 #   5. cc-relay MCP server を user-level ~/.claude.json に登録
 #      + (optional) github-mcp-admin entry を $GITHUB_MCP_ADMIN_TOKEN_JSON 経由で登録
+#      + (optional) local-lib-run stdio MCP (ippoan/cdp-relay local-mcp、bun 実行)
+#        を server.ts fetch のうえ登録 (CCoW の lib/SDK を動的読み込みして検証)
 #   6. skills bootstrap                                 (CCoW git proxy 経由で claude-skills clone)
 #   7. plugins                                          (anthropics/claude-code marketplace の security-guidance を install)
 #   7.5 universal-ctags                                 (on-demand symbol 抽出用の binary pre-install)
@@ -79,6 +81,12 @@
 #   SKIP_SECRETS_INVENTORY_MCP=1
 #                            1 を立てると secrets-inventory read-only mcpServer 登録
 #                            (Refs ippoan/secrets-inventory#61) を skip + 既存 entry 除去
+#   SKIP_LOCAL_MCP=1         1 を立てると local-lib-run stdio mcpServer
+#                            (ippoan/cdp-relay local-mcp、bun 実行) の登録を skip
+#                            + 既存 entry 除去
+#   LOCAL_MCP_SERVER_URL     local-lib-run の server.ts を fetch する raw URL
+#                            (default: cdp-relay main の local-mcp/server.ts)
+#   LOCAL_MCP_DIR            server.ts の配置先 (default: $CLAUDE_HOME/local-mcp)
 #   SECRETS_INVENTORY_MCP_URL    secrets-inventory MCP の URL
 #                            (default: https://security-inventory.ippoan.org/mcp)
 #   SECRETS_INVENTORY_AUTH_ORIGIN  read-only binding_jwt を mint する auth-worker origin
@@ -205,6 +213,13 @@ REF_FILES_MCP_TOKEN_JSON="${REF_FILES_MCP_TOKEN_JSON:-}"
 # prod RS; auth origin is prod (prod RS introspects against prod auth-worker).
 SECRETS_INVENTORY_MCP_URL="${SECRETS_INVENTORY_MCP_URL:-https://security-inventory.ippoan.org/mcp}"
 SECRETS_INVENTORY_AUTH_ORIGIN="${SECRETS_INVENTORY_AUTH_ORIGIN:-https://auth.ippoan.org}"
+# local-lib-run MCP (ippoan/cdp-relay local-mcp) — CCoW コンテナ内で bun が動かす
+# stdio MCP。ワークスペースの lib/SDK を動的に読み込んで実行・検証する汎用 tool。
+# server.ts を cdp-relay (public) raw から fetch して $LOCAL_MCP_DIR に置き、
+# `~/.claude.json` に `{type:stdio, command:bun, args:[run, server.ts]}` で登録する。
+# bun 不在 or fetch 失敗なら graceful skip (entry を作らない)。SKIP_LOCAL_MCP=1 で無効化。
+LOCAL_MCP_SERVER_URL="${LOCAL_MCP_SERVER_URL:-https://raw.githubusercontent.com/ippoan/cdp-relay/main/local-mcp/server.ts}"
+LOCAL_MCP_DIR="${LOCAL_MCP_DIR:-$CLAUDE_HOME/local-mcp}"
 
 log() { echo "[install.sh] $*"; }
 
@@ -491,6 +506,34 @@ json.dump(out, open(sys.argv[2], "w"))
   # ($GITHUB_MCP_URL_BASE = https://mcp.ippoan.org prod) になる。
   : "${mcp_relay_url_base_for_py:=$MCP_RELAY_URL_BASE}"
 
+  # ── local-lib-run MCP (ippoan/cdp-relay local-mcp) ──────────────────────
+  # bun が動かす stdio MCP。CCoW の lib/SDK を動的読み込みして実行・検証する。
+  # server.ts を cdp-relay (public) raw から fetch して bun の絶対 path で登録。
+  # bun 不在 / fetch 失敗 / SKIP_LOCAL_MCP=1 のときは vars 空 → python 側で
+  # 既存 entry を idempotent に除去 (= 登録しない)。
+  local_mcp_bun_for_py=""
+  local_mcp_server_for_py=""
+  if [ "${SKIP_LOCAL_MCP:-0}" = "1" ]; then
+    log "MCP: skip local-lib-run (SKIP_LOCAL_MCP=1)"
+  else
+    # Claude Code は mcpServers.command を直接 spawn するので、PATH に依存せず
+    # 解決できる絶対 path を焼く (CCoW では $HOME/.bun/bin/bun)。
+    _bun="$(command -v bun 2>/dev/null || true)"
+    [ -z "$_bun" ] && [ -x "$HOME/.bun/bin/bun" ] && _bun="$HOME/.bun/bin/bun"
+    if [ -z "$_bun" ]; then
+      log "MCP: skip local-lib-run (bun not found)"
+    else
+      mkdir -p "$LOCAL_MCP_DIR"
+      if curl -fsSL --max-time 15 -o "$LOCAL_MCP_DIR/server.ts" "$LOCAL_MCP_SERVER_URL" 2>/dev/null; then
+        local_mcp_bun_for_py="$_bun"
+        local_mcp_server_for_py="$LOCAL_MCP_DIR/server.ts"
+        log "MCP: local-lib-run server.ts fetched ($LOCAL_MCP_SERVER_URL)"
+      else
+        log "MCP: skip local-lib-run (server.ts fetch failed; cdp-relay main not yet merged?)"
+      fi
+    fi
+  fi
+
   GITHUB_MCP_ADMIN_TOKEN_JSON="$admin_token_for_py" \
   GITHUB_MCP_URL_BASE="$GITHUB_MCP_URL_BASE" \
   MCP_RELAY_LOGIN="$mcp_relay_login_for_py" \
@@ -501,6 +544,8 @@ json.dump(out, open(sys.argv[2], "w"))
   SECRETS_INVENTORY_MCP_JWT="$secrets_inventory_jwt_for_py" \
   SECRETS_INVENTORY_MCP_URL="$SECRETS_INVENTORY_MCP_URL" \
   SECRETS_INVENTORY_MCP_DISABLED="$secrets_inventory_disabled_for_py" \
+  LOCAL_MCP_BUN="$local_mcp_bun_for_py" \
+  LOCAL_MCP_SERVER="$local_mcp_server_for_py" \
   python3 - "$CLAUDE_JSON_DEST" "$CC_RELAY_MCP_URL" <<'PY'
 import json, os, sys
 
@@ -611,6 +656,23 @@ elif si_disabled:
     if servers.pop("secrets-inventory", None) is not None:
         si_msg = "removed secrets-inventory entry (SKIP_SECRETS_INVENTORY_MCP=1)"
 
+# local-lib-run (ippoan/cdp-relay local-mcp): bun が動かす stdio mcpServer。
+# bun path + server.ts path が両方そろったときだけ登録。どちらか欠けたら
+# (bun 不在 / fetch 失敗 / SKIP_LOCAL_MCP=1) 既存 entry を idempotent に除去。
+local_mcp_bun = os.environ.get("LOCAL_MCP_BUN", "")
+local_mcp_server = os.environ.get("LOCAL_MCP_SERVER", "")
+local_mcp_msg = None
+if local_mcp_bun and local_mcp_server:
+    servers["local-lib-run"] = {
+        "type": "stdio",
+        "command": local_mcp_bun,
+        "args": ["run", local_mcp_server],
+    }
+    local_mcp_msg = f"registered local-lib-run (stdio: {local_mcp_bun} run {local_mcp_server})"
+else:
+    if servers.pop("local-lib-run", None) is not None:
+        local_mcp_msg = "removed stale local-lib-run entry (bun or server.ts unavailable)"
+
 tmp = path + ".tmp"
 with open(tmp, "w") as f:
     json.dump(data, f, indent=2)
@@ -622,6 +684,8 @@ if mcp_relay_msg:
     print(f"[install.sh] MCP: {mcp_relay_msg}")
 if si_msg:
     print(f"[install.sh] MCP: {si_msg}")
+if local_mcp_msg:
+    print(f"[install.sh] MCP: {local_mcp_msg}")
 PY
 fi
 
