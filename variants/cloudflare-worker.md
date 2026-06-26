@@ -53,6 +53,24 @@ publish-dev (該当 repo のみ — auth-client の packages/* publish)
 - merge + `v*` タグ → `Publish Release` で latest publish
 - `npm_publish_directory: 'packages/<name>'` (test.yml)
 
+### 消費側の version pin (staging=dev / prod=v タグ)
+
+`@ippoan/*` lib を consume する側は **channel を環境に揃える**:
+
+- **staging consumer** (PR auto-deploy / single-env=staging) → `package.json` は
+  **`dev` dist-tag** に pin。新 export を出した直後の検証はこの channel で回す。
+  test.yml に **`use_auth_client_dev: true`** (frontend-ci の overlay action) を
+  足すと、PR event で `npm install <pkg>@dev` を lockfile の後に上書き install
+  するので、stable 未掲載の新 export でも PR/staging が green になる。
+- **prod consumer** (`v*` タグで本番 deploy) → **stable `v*` (caret pin)**。
+  **`dev` を実 prod に届かせない** (壊れた dev で本番が割れるのを防ぐ)。
+  prod タグを切る前に `package.json` を `dev` → stable へ bump する (step 化)。
+
+> 新 export を stable に出した後も、移行 PR は **まず dev で staging 検証 →
+> green を確認してから stable bump** の順を守る。`push`(main) event では overlay が
+> 走らないので、dev pin のまま main に merge すると main typecheck が赤になり得る
+> (dev チャネル運用の既知トレードオフ。stable bump で解消)。
+
 ### 消費側 repo
 
 | リポジトリ | 使用 export |
