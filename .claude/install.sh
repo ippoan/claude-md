@@ -159,6 +159,7 @@ HOOK_SCRIPTS=(
   "session-start-install-hooks.sh"
   "session-start-snapshot.sh"
   "pre-tool-claude-dir-drift.sh"
+  "pre-tool-github-issue-write-reminder.sh"
   "session-start-refresh-installer.sh"
   "session-start-install-mcp-relay.sh"
   "session-start-policy-reminder.sh"
@@ -180,6 +181,7 @@ LEGACY_HOOK_URL="${CLAUDE_HOOK_URL:-}"
 # Format: "<name>=<sha256>", one per line, sorted by name.
 HOOK_SHAS=$(cat <<'HOOK_SHAS_EOF'
 pre-tool-claude-dir-drift.sh=bdf35f2dfb5dd360c320d84d9f8368dd585a90b4366aa30670c26e7087ccebd0
+pre-tool-github-issue-write-reminder.sh=0000000000000000000000000000000000000000000000000000000000000000
 session-start-install-hooks.sh=bf5aa6ac8b35fdf00e7b6525bfed0f36315ca1c7374428efc629eaf5465d5a17
 session-start-install-mcp-relay.sh=1b2011d270930c2ba05d5d69a6a4edef651b1a36dd858fa975ee4675191e1c7e
 session-start-policy-reminder.sh=8c9dfe3c79c7a837901e7558e5079dae715d9d60cb88cc6bf83a5a02ccbdbb0c
