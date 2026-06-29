@@ -168,6 +168,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "mcp__github__issue_write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.claude/hooks/pre-tool-github-issue-write-reminder.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
