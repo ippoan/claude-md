@@ -78,7 +78,9 @@
       "mcp__secrets-inventory__list_service_accounts",
       "mcp__secrets-inventory__get_drift",
       "mcp__secrets-inventory__get_snapshot",
-      "mcp__secrets-inventory__dry_run_rotate"
+      "mcp__secrets-inventory__dry_run_rotate",
+      "mcp__Claude_Code_Remote__send_later",
+      "mcp__Claude_Code_Remote__delete_trigger"
     ]
   },
   "hooks": {
