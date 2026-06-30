@@ -573,6 +573,17 @@ mcp_relay_url = os.environ.get("MCP_RELAY_URL", "")
 github_mcp_token_raw = os.environ.get("GITHUB_MCP_TOKEN_JSON", "")
 ref_files_mcp_token_raw = os.environ.get("REF_FILES_MCP_TOKEN_JSON", "")
 
+
+def _extract_jwt(token_raw):
+    if not token_raw:
+        return None
+    try:
+        tok = json.loads(token_raw)
+    except json.JSONDecodeError:
+        return None
+    return tok.get("binding_jwt") or tok.get("access_token")
+
+
 try:
     with open(path) as f:
         data = json.load(f)
@@ -580,7 +591,20 @@ except (FileNotFoundError, json.JSONDecodeError):
     data = {}
 
 servers = data.setdefault("mcpServers", {})
-servers["cc-relay"] = {"type": "http", "url": cc_relay_url}
+
+# cc-relay (ippoan/cc-relay#35, ADR-003 user-less `/mcp`): auth-worker の
+# `handleMcpRelayBridge` は Authorization header 必須 (legacy aud allowlist
+# `["github-mcp-server-rs"]` を素通りする)。github-mcp-server-rs 用に
+# grant-via-oat で mint 済みの binding_jwt をそのまま再利用する — user-less
+# route は path の :user 照合をしない (JWT の github_login が origin of
+# truth) ので、別 aud を新規に切らず既存 JWT を common credential として使い
+# 回せる。JWT が無い (OAT 未 bind 等) 場合は従来通り header 無しで登録し、
+# 認証が必要な状態のまま skip する (= 既存挙動を壊さない graceful fallback)。
+cc_relay_jwt = _extract_jwt(github_mcp_token_raw)
+cc_relay_entry = {"type": "http", "url": cc_relay_url}
+if cc_relay_jwt:
+    cc_relay_entry["headers"] = {"Authorization": f"Bearer {cc_relay_jwt}"}
+servers["cc-relay"] = cc_relay_entry
 
 admin_msg = None
 if admin_token_raw:
@@ -614,16 +638,9 @@ if mcp_relay_login:
 
     def _build_entry(token_raw):
         entry = {"type": "http", "url": relay_url}
-        if not token_raw:
-            return entry
-        try:
-            tok = json.loads(token_raw)
-            jwt = tok.get("binding_jwt") or tok.get("access_token")
-            if jwt:
-                entry["headers"] = {"Authorization": f"Bearer {jwt}"}
-        except json.JSONDecodeError:
-            # graceful: token JSON 壊れていても URL register は続行
-            pass
+        jwt = _extract_jwt(token_raw)
+        if jwt:
+            entry["headers"] = {"Authorization": f"Bearer {jwt}"}
         return entry
 
     servers["github-mcp-server-rs"] = _build_entry(github_mcp_token_raw)
