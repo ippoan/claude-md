@@ -49,6 +49,8 @@ emit() {
   python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":sys.argv[1]}}))' "$1"
 }
 
+skill_count=0
+
 # 1. attached repo の .git/config から proxy URL を抜き出す
 PROXY_BASE=""
 for parent in $SCAN_DIRS; do
@@ -63,8 +65,45 @@ for parent in $SCAN_DIRS; do
   done
 done
 
+# 1b. Attached な個人/業務 repo が repo-root 直下に `skills/<name>/SKILL.md`
+#     を持つケース (`.claude/skills/` ではない置き場) を、その repo 自身の
+#     `.claude/skills/<name>` へ symlink する (repo-local。~/.claude/skills/
+#     へのグローバル symlink にはしない — repo が attach されていない
+#     セッションでもその skill 名が一覧に出てしまい、実体が無いので呼び出すと
+#     失敗するため。repo-local にすることで、その repo を開いた時だけ
+#     Claude Code の標準スコープ discovery に乗る)。
+#     `.claude/skills/` は Claude Code が repo を開いた時点で自動認識する
+#     ため hook の出番は無いが、repo-root 直下 `skills/` は認識対象外
+#     (実例: yhonda-ohishi/moneyforward が `skills/mf-*` を使っていたため、
+#     CCoW セッションで一度も Skill 一覧に出てこなかった)。
+#     特定 repo 名はハードコードせず、$SCAN_DIRS 配下の全 attached repo を
+#     汎用的に走査する。attached repo が無い/未 clone のセッション、
+#     または repo に `skills/` 自体が無いケースでも glob/`-d` チェックで
+#     素通りするだけで fail しない (fail-open)。CCoW git proxy の有無にも
+#     依存しない (ローカルに既に mount 済みの repo を読むだけのため) ので、
+#     以降の proxy チェックより前に置く。
+#     conflict policy: 対象 repo 自身の `.claude/skills/<name>` に既に
+#     何か (実ディレクトリ・別 symlink) があれば上書きしない (repo 側の
+#     意図的な配置を尊重)。
+for parent in $SCAN_DIRS; do
+  [ -d "$parent" ] || continue
+  for repo_dir in "$parent"/*/; do
+    repo_skills="${repo_dir}skills"
+    [ -d "$repo_skills" ] || continue
+    repo_claude_skills="${repo_dir}.claude/skills"
+    mkdir -p "$repo_claude_skills" 2>/dev/null || continue
+    while IFS= read -r skill_md; do
+      dir="$(dirname "$skill_md")"
+      name="$(basename "$dir")"
+      target="$repo_claude_skills/$name"
+      [ -e "$target" ] && continue
+      ln -s "$dir" "$target" 2>/dev/null && skill_count=$((skill_count + 1))
+    done < <(find "$repo_skills" -maxdepth 2 -name SKILL.md -not -path '*/.git/*' 2>/dev/null)
+  done
+done
+
 if [ -z "$PROXY_BASE" ]; then
-  emit "session-start-install-hooks: no CCoW git proxy detected — skipped"
+  emit "session-start-install-hooks: no CCoW git proxy detected — skipped (repo-local skills=$skill_count)"
   exit 0
 fi
 
@@ -113,7 +152,7 @@ clone_or_pull anthropics    skills        anthropic-skills "$ANTHROPIC_DIRECT_UR
 #    Sources are processed in order; ippoan/claude-skills owns its
 #    slots (re-linked even if a symlink already exists), anthropics/skills
 #    only fills slots that are still empty.
-skill_count=0
+# (skill_count は 1b で既に初期化済み)
 
 # args: <source-dir> <allow-relink: 1|0>
 link_skills_from() {
