@@ -212,16 +212,6 @@
             "timeout": 10
           }
         ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/root/.claude/sources/claude-hooks/post-push-preview-url.sh",
-            "timeout": 15
-          }
-        ]
       }
     ],
     "Stop": [
