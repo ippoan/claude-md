@@ -80,7 +80,12 @@
       "mcp__secrets-inventory__get_snapshot",
       "mcp__secrets-inventory__dry_run_rotate",
       "mcp__Claude_Code_Remote__send_later",
-      "mcp__Claude_Code_Remote__delete_trigger"
+      "mcp__Claude_Code_Remote__delete_trigger",
+      "mcp__Claude_Code_Remote__create_trigger",
+      "mcp__Claude_Code_Remote__list_triggers",
+      "mcp__Claude_Code_Remote__update_trigger",
+      "mcp__Claude_Code_Remote__fire_trigger",
+      "ScheduleWakeup"
     ]
   },
   "hooks": {
