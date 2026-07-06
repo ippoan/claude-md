@@ -2,291 +2,53 @@
 
 <<REPO_PURPOSE_ONELINER>>
 
-このリポジトリで Claude Code セッションを動かす時の作業ガイド。本ファイルは
-[ippoan/claude-md](https://github.com/ippoan/claude-md) の `CLAUDE.md.template`
-から生成されている — 共通項を直すときは template を更新する。
+Working guide for Claude Code sessions in this repo. Generated from
+[ippoan/claude-md](https://github.com/ippoan/claude-md) `CLAUDE.md.template` —
+edit shared parts there.
 
-## 作業ライフサイクル (issue → PR → push → fin) ★徹底
+> **Org-wide rules** (issue→PR→push lifecycle, don't-assume-read-first,
+> lib-first, branches/worktree, GitHub automation, secrets, never-do) live in
+> `~/.claude/CLAUDE.md` (user memory, installed every session by ippoan/claude-md).
+> Put **only repo-specific things** here; override the baseline only when needed
+> (project memory wins).
 
-すべてのタスクはこの順序で進める。途中の段階を飛ばさない。
+## Read first
 
-1. **issue** — 着手前に必ず issue を立てる (または既存 issue を特定する)。
-   issue 番号で branch を切る (`<issue-number>-<type>-<short-description>`)。
-   issue 無しで `claude/...` branch のまま実装に入らない。
-   - **計画 (plan / design) の作成・更新も PR で行う。** 計画は会話や issue 本文の
-     口頭で済ませず、repo 内ファイル (例: `docs/plan-<topic>.md`) として起こし、
-     その追加・更新を PR レビューに乗せて履歴を残す。計画が固まってから実装に入る。
-2. **PR** — 実装 / 計画が一段落したら PR を作る。body に `Refs #N` で issue を紐付ける
-   (`Closes/Fixes/Resolves` は使わない、下記 §「GitHub 自動化」)。PR 作成の可否は
-   §「PR 作成前にユーザーに確認」に従う。
-3. **push** — commit して branch に push。PR 作成と同じ turn で
-   `mcp__github__subscribe_pr_activity` を呼び CI を watch する (§「PR 作成後の CI 監視」)。
-   `sleep` / polling はせずターンを終える。
-4. **fin** — CI green → (auto-)merge で `main` 反映 → 完了。issue は auto-close せず、
-   release tag 時に [ci-dashboard](https://github.com/ippoan/ci-dashboard) で目視 close する。
+- [`README.md`](./README.md) — what `<<REPO_NAME>>` is.
+- **`<<REPO_NAME>>-map` skill** — structure + detail (tables, endpoints, gotchas,
+  deploy steps). Detail lives here (lazy-loaded). Point to it conditionally:
+  <<KEY_DOCS>>
+  - e.g. `before touching <X>, read <<REPO_NAME>>-map §<topic>`
+- [Project board](<<PROJECT_BOARD_URL>>) — each issue's acceptance criteria = done.
 
-各段階の詳細ルールは以下の該当セクションを参照。
+## Repo-specific invariants
 
-## 決めつけで動かない — 計画 / issue / source を確認、矛盾は user に確認 ★徹底
+Short do/don't lines that apply only here (keep to one line each; reasons and
+repro go in the map skill, not here):
 
-推測・思い込みで実装や本番操作に進まない。手を動かす前に **計画 (plan / design
-doc)・対象 issue・関連 source code を実際に開いて読む**。「たぶんこうだろう」で
-コードの挙動・設計意図・用語の意味・既存の結論を決めつけない。
+<<REPO_SPECIFIC_INVARIANTS>>
 
-- **読む順を飛ばさない**: 親 issue / plan doc → 当該 issue の本文と受け入れ条件
-  → 関連 source の実体 (handler / 設定 / workflow / 仕様) → 会話履歴で既出の結論。
-  ここを読み切る前に操作・実装・断定をしない。
-- **矛盾を見つけたら user に確認する。** 自分の理解と 計画 / issue / source /
-  user の発言が食い違ったら、勝手に解釈で埋めて進めず **矛盾点を明示して user に
-  問う** (`AskUserQuestion`)。「自分の読みの方が正しいはず」で押し切らない。
-- **既に議論済みの論点を蒸し返さない。** 同じ設計判断・用語の意味を何度も再導出
-  しない。過去に確定した結論 (issue / plan / 会話履歴) を先に探して踏襲する。
-  再検討が要るなら「以前 X と決めた。Y の点で再考したい」と前置きして user に確認。
-- **仕組み・用語を言い換えで歪めない。** ある操作・機構が "実際に何をするか" は
-  一次情報 (source / 仕様) に当たって正確に述べる。一次情報を読まずに挙動を
-  説明・断定しない。曖昧なら確認する。
-- **本番影響 / 破壊的 / 不可逆な操作**は、前提が 1 つでも未確認なら実行前に必ず
-  user に確認する (§「やってはいけないこと」「PR 作成前にユーザーに確認」と同じ温度感)。
+## Build / test / lint
 
-> 何度も同じ手戻りを user にさせない。「読まずに決めつけ → 実行 → 指摘されて戻す」
-> を繰り返すより、読む・確認するコストを先に払う。
-
-## lib-first — 再実装する前に既存実装を探す ★徹底
-
-util / helper / 横断ロジック (JWT 検証、timing-safe 比較、base64url、fetch
-wrapper、CORS、coverage script 等) を**新規に書く前に**、org 内に既存実装が
-無いか必ず確認する。「知らずに再実装 → 複製が drift → 修正が 2 度手間」が
-実害として多発した (監査の記録: ippoan/claude-md#76)。
-
-- **書く前に 2 つ確認する**:
-  1. `ippoan-lib-catalog` skill — capability → canonical lib の対応表
-  2. org 横断検索 — clone 済み repo に対して `grep -rn "<機能語>" /home/user/*/src`
-     や その場 ctags (全 repo 3.8 秒、binary は install.sh が pre-install 済み)
-- **既存 lib にあれば consume する** (`@ippoan/mcp-cf-workers` / `@ippoan/auth-client`
-  / `@ippoan/egov-shinsei-sdk` / ci-workflows reusable / rust-alc-api の alc-* crates 等)。
-  lib に不足があれば **lib 側に足して publish → consumer で使う** (手元に fork しない)
-- **rule of two**: 同じロジックが 2 repo 目で必要になった時点で lib 切り出しを
-  user に提案する。3 repo 目のコピーを作らない
-- **やむを得ず copy する場合** (ts-rs 生成型の配布先、lib 移行までの暫定 sync) は
-  ファイル先頭 5 行以内に `SOURCE-MIRROR: <repo>:<path>` を宣言する。SessionStart
-  hook (`session-start-source-mirror-check.sh`) が canonical との hash 乖離を監視する
-- **「同実装を手動 sync で維持する」というコメントを書かない** — それは lib 化の
-  シグナル。書きたくなったら user に lib 切り出しを提案する
-
-## まず読むもの
-
-- [`README.md`](./README.md) — `<<REPO_NAME>>` とは何か、ざっくり。
-- <<KEY_DOCS>>
-  - 例: [`ARCHITECTURE.md`](./ARCHITECTURE.md) — 設計の根拠 (一番下の現行 ADR 以外は履歴)
-  - 例: [`docs/<<TOPIC>>.md`](./docs/<<TOPIC>>.md) — 各論
-- [Project board](<<PROJECT_BOARD_URL>>) — フェーズ別ロードマップ。各 issue の
-  「完了条件」セクションが done の定義。
-
-## ブランチ運用 / Worktree
-
-- 作業は **`main` から切った短命ブランチ**上で行う。命名規則:
-  ```
-  <<BRANCH_NAMING_PATTERN>>
-  ```
-  - 推奨形式: `<issue-number>-<type>-<short-description>` (`type ∈ feat|fix|refactor|infra`)
-  - Claude Code が自動採番する `claude/<topic>-<sha>` で実装に入った場合は、
-    対応 issue を立てた上で上記形式に rename する
-- 並走するセッションが別 crate / 別 package を触る時は `git worktree` で分離:
-  ```sh
-  git worktree add ../<<REPO_NAME>>-issue-<N> <N>-<type>-<desc>
-  ```
-- **`main` に直接 push しない。** PR を開く → CI が green になれば
-  auto-merge ワークフローが自動 merge する (下の §「GitHub 自動化」)。
-- `git push --force` / `git commit --amend` / `git rebase -i` は `claude-hooks`
-  の `git-safe-push.sh` で block されている。
-
-## ビルド / テスト / lint
-
-PR を出す前に手元で全部 green であること:
+Green locally before a PR (same commands as CI):
 
 ```sh
 <<BUILD_CMDS>>
 ```
 
-CI (`.github/workflows/ci.yml` 等) は `main` への PR ごとに上を matrix で回す。
-**CI と同じコマンドを書く** こと — divergence させると後で痛む。
+## CI / auto-merge (repo-specific config)
 
-## Hooks
+Common auto-merge / `Refs #N` rules are in user memory. Only repo-specific values here:
 
-`.claude/settings.json` から呼び出すシェルスクリプトを使う場合の方針:
-
-- repo 内 `.claude/hooks/` 配下に置くか、`ippoan/claude-hooks` の
-  centralised hook を delegate 呼び出しする (推奨)
-- versioning は sha256 ピン留め or release tag 参照
-- **Web-only な hook は `CLAUDE_CODE_REMOTE=true` 判定でローカルを skip**
-  ```bash
-  if [[ "${CLAUDE_CODE_REMOTE:-}" != "true" ]]; then exit 0; fi
-  ```
-- 環境変数を session に persist させたい場合は `$CLAUDE_ENV_FILE` に append
-- `~/.claude/settings.json` は **git 管理外**。登録例は本 CLAUDE.md か
-  `README.md` に必ず残す
-
-### ⚠️ user-level 設定変更の 1 session 遅延
-
-CCoW environment + Claude Code の load 順により、以下 2 種類の変更は
-**当該 session には反映されず、次 session から有効** になる:
-
-| 対象 | 反映タイミング |
-|---|---|
-| `~/.claude/settings.json` の `permissions.allow/deny/ask` | 次 session |
-| `~/.claude/settings.json` の hook 登録 (`SessionStart` / `PreToolUse` 等) | 次 session |
-| `~/.claude.json` の `mcpServers` | 次 session |
-| `~/.claude/hooks/*.sh` の中身 | 即時 (各 hook 発火時に disk read) |
-| `~/.claude/skills/` / `sources/` | 即時 |
-| `/home/user/<repo>` 内 file | 即時 |
-
-理由: Claude Code は起動時 1 度だけ `settings.json` / `~/.claude.json` を
-read してメモリに hold し、session 中は再 read しない。一方 hook script
-本体は fire のたび disk から実行されるので即時反映される。
-
-[`ippoan/claude-md`](https://github.com/ippoan/claude-md) の
-`.claude/hooks/session-start-refresh-installer.sh` が毎 session 起動時に
-最新 install.sh を fetch して disk 上の hooks / mcpServers を更新するが、
-**Claude Code の in-memory state までは触れない** ため上記の遅延は不可避。
-
-参考:
-- [Claude Code on the web — Setup script cache 仕様](https://code.claude.com/docs/en/claude-code-on-the-web#environment-caching)
-- [`anthropics/claude-code` #30737 — Allow reloading permissions/settings in a running session](https://github.com/anthropics/claude-code/issues/30737)
-- [`anthropics/claude-code` #5513 — `/reloadSettings` command feature request](https://github.com/anthropics/claude-code/issues/5513)
-- [`anthropics/claude-code` #33829 — Hot-reload permissions from settings.local.json](https://github.com/anthropics/claude-code/issues/33829)
-
-→ permissions/mcpServers を即時反映したい場合のみ:
-1. CCoW UI で Setup script 欄を編集 (`# bust YYYYMMDD-HHMMSS` 等)
-2. 新規 session を起動 (resume では setup script は再走しない)
-
-それ以外の変更は何もせず次 session で勝手に反映される。
-
-## GitHub 自動化
-
-### Auto-merge
-
-`.github/workflows/auto-merge.yml` が PR 作成時 (非 draft) に
-`gh pr merge --auto --squash` を叩く。実際の merge gate は `main` の
-ブランチ保護ルールが握る:
-
-- Settings → General → **Allow auto-merge** を ON
-- Settings → Branches → `main` の保護で 以下を **Required status checks** に追加:
+- Required status checks (`main` branch protection):
   ```
   <<REQUIRED_STATUS_CHECKS>>
   ```
-
-これらが無いと auto-merge は単に「PR を即時 squash merge」する挺動になる
-(ガードレール無し) — 必ず両方設定する。
-
-### Claude による auto-merge enable は禁止
-
-Claude Code セッションが `mcp__github__enable_pr_auto_merge` を呼ぶことは
-**user が明示的に指示したとき以外は禁止**。reflex で叩かない。
-
-理由 (実害ケース):
-
-- branch protection の required status check が完全に揃っていない repo
-  (新設 CI check が未追加 / `ci /` prefix を持たない workflow が混在 等) で
-  auto-merge を enable すると、GitHub が「現時点で satisfied」と判定して
-  **CI が走り切る前に即 merge** する事故が起きる
-  (実害: `ippoan/secrets-inventory-gcp#21` / `ippoan/ci-dashboard#89`)
-- `ci-workflows/frontend-ci.yml` の `disable-auto-merge` step も Claude の enable
-  call の "数秒後" に走るので race を防げない — GitHub 側の merge 判定の方が早い
-- repo に `auto-merge.yml` workflow がある場合、CI green 完了後に workflow 自身が
-  enable するので、Claude が事前 enable する必要はない
-
-✅ 推奨: PR を作ったら CI 結果を `subscribe_pr_activity` で待ち、green を
-確認した上で user が手動 merge する (または user が「auto-merge enable して」
-と明示指示する)。
-
-❌ 禁止: `mcp__github__create_pull_request` の直後に `enable_pr_auto_merge` を
-反射的に呼ぶ。
-
-### PR description / commit message のキーワード
-
-- ❌ 使用禁止: `Closes #N` / `Fixes #N` / `Resolves #N`
-  - auto-merge が走った瞬間に issue が auto-close されるため、release tag 時の
-    close 確認 UI と整合しない
-- ✅ 使用推奨: `Refs #N` / `Related to #N` / `Part of #N`
-  - GitHub の Development セクションには紐付くが auto-close されない
-  - release tag 後に [ci-dashboard](https://github.com/ippoan/ci-dashboard) の
-    close 確認 UI で目視 close する
-
-PR template (`.github/pull_request_template.md`) で `Refs` を強制する。
-
-### PR 作成前にユーザーに確認
-
-実装 / 修正 / リファクタが終わって commit + push まで進んだら、**PR を勝手に
-作らずに必ず user に「PR してよいか」を確認する。** Claude Code harness 側の
-system prompt にも "Do NOT create a pull request unless the user explicitly
-asks for one" と入っているが、user の作業フロー (レビュー件数 / タイミング /
-draft 扱い / 関連 PR との順序) を尊重するため repo 側のルールとしても明文化する。
-
-- ✅ 推奨フロー: branch push 完了 → user に「PR 作る？draft にする？」と尋ねる →
-  user の指示が出てから `mcp__github__create_pull_request` を呼ぶ
-- ❌ 禁止: push と同じターン内に確認なしで PR を作る (たとえ branch 命名・タイトル・
-  body が完全に整っていても)
-- 例外: user が **同じ会話で明示的に** 「PR まで一気に作って」「終わったら PR して」
-  と指示した場合のみ、再確認なしで PR まで進んでよい
-- PR を作った直後の `subscribe_pr_activity` 呼び出しは次節のとおり (PR 作成自体が
-  確認済みであれば、その流れの中で subscribe してターン終了する)
-
-### PR 作成後の CI 監視
-
-**PR を作成したら必ず同じ turn で `mcp__github__subscribe_pr_activity` を呼んで
-CI を watch する。** Claude session 側に CI 完了が webhook で届くので、
-green/red を見て次の判断 (merge 待ち / fix push) に進める。
-
-```
-PR 作成 → 直後に subscribe_pr_activity(owner, repo, pullNumber) → ターン終了
-```
-
-- 監視中は CI fail / review comment が `<github-webhook-activity>` で届く
-- user から「CI 確認しといて」「watch しといて」と明示されなくても、
-  PR を新規に作った直後だけは default で subscribe する
-- 不要になったら `unsubscribe_pr_activity` で外す (user が「もういい」と言った時、
-  PR が merge された時、ターンの最終目的が達成された時)
-- `sleep` / `gh run watch` / 手動 polling は禁止 — webhook で起こされる前提で
-  そのターンは終了する
-
-### Release
-
-タグは `workflow_dispatch` (`.github/workflows/tag-release.yml`) で発行する。
-ローカル `git tag v*` 直叩きは `claude-hooks` の `tag-release-userprompt-guard.sh`
-が user 明示指示なしに block する。
-
-## やってはいけないこと
-
-- **`main` に直 push しない** (proxy 側でも block されるが、習慣として)。
-- **force push / amend / rebase -i しない** — `git-safe-push.sh` が block する。
-- **`gh pr merge` をローカルで叩かない** — auto-merge に任せる。
-- **secret / 秘密鍵 (`.env`, `*.pem`, `*.key`) をコミットしない** — `.gitignore`
-  が守っているが、`git add -f` で強制追加しないこと。
-- **GCP / CF への secret 投入で `echo` を使わない** — `echo "$v" | gcloud
-  secrets versions add ...` は末尾に `\n` を混入させ、消費側の string 比較
-  (OAuth audience / HMAC 鍵 / JSON parse 等) を silent fail させる (実害:
-  [ippoan/auth-worker#208](https://github.com/ippoan/auth-worker/issues/208)
-  — `GOOGLE_CLIENT_ID` 末尾 `\n` で rust-alc-api が `InvalidAudience`)。必ず
-  `printf '%s'` を使う:
-  ```sh
-  printf '%s' "$v" | gcloud secrets versions add NAME --data-file=-
-  ```
-  MCP `create_secret` / HTTP `PUT /mcp/secret-upload/:name` 経由は echo を
-  介さず raw 投入するので安全 (末尾空白は default で reject、
-  `X-Allow-Trailing-Whitespace: true` で明示許可)。`.dev.vars` から投入する
-  前に length / trailing whitespace / JSON 整合を検査する pre-flight
-  (例: auth-worker `npm run check:secrets`) を通すこと。
-- **MVP target が green になる前に未検証 platform 向けの分岐コードを足さない**
-  — 例: Linux x86_64 が動く前に macOS arm64 用の cfg ブロックを入れる、等。
-- **`PROTOCOL_VERSION` 等の wire protocol 定数を後方互換を壊して触らない** —
-  破壊的変更時は必ず bump する。
-- **CI を green にするためだけのテスト無効化 / skip flag を入れない** — root cause
-  を直す。
 
 <<DOMAIN_SPECIFIC_SECTIONS>>
 
 ---
 
-_このファイルは [`ippoan/claude-md`](https://github.com/ippoan/claude-md) の
-`CLAUDE.md.template` から生成されている。共通項を直すときは template 側を
-更新して全 consumer repo に propagate すること。_
+_Generated from [ippoan/claude-md](https://github.com/ippoan/claude-md)
+`CLAUDE.md.template`; the org baseline lives in user memory (`~/.claude/CLAUDE.md`,
+installed by install.sh). Edit shared rules in `user-memory.md` / this template._
