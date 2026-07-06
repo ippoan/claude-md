@@ -185,6 +185,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.claude/sources/claude-hooks/pre-tool-claude-md-size.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
