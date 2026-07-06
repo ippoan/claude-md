@@ -235,12 +235,14 @@ else
   log "settings.json: $SETTINGS_DEST (allow=$ALLOW)"
 fi
 
-# --- 2. user-level CLAUDE.md (locale instruction in marker block) ---
-# settings.json schema には locale / language に相当する key が無いので、
-# 応答言語の default 化は user memory (~/.claude/CLAUDE.md) 経由で行う。
-# marker block 方式 (BEGIN..END) で既存内容を保ったまま idempotent に merge する。
+# --- 2. user-level CLAUDE.md (locale + org baseline in marker block) ---
+# settings.json schema には locale / language に相当する key が無く、また CCoW は
+# attach された repo が可変なので、応答言語の default 化と org 共通作業規範
+# (branch/PR/secret 等) の always-on 配布を user memory (~/.claude/CLAUDE.md) 経由で行う。
+# = user-memory.md の全文を marker block (BEGIN..END) で既存内容を保ったまま
+# idempotent に merge する (どの repo が attach されていても共通規範が消えない fallback)。
 # project 側 ./CLAUDE.md (project memory) が user memory より優先されるので
-# repo ごとの opt-out はそちらで上書きできる。
+# repo 固有の例外 (opt-out / override) はそちらで上書きできる。
 if [ "${SKIP_USER_MEMORY:-0}" = "1" ]; then
   log "skip: SKIP_USER_MEMORY=1"
 else
@@ -279,7 +281,7 @@ if new != existing:
     with open(tmp, "w") as f:
         f.write(new)
     os.replace(tmp, dest)
-    print(f"[install.sh] user-memory: updated {dest} (locale block)")
+    print(f"[install.sh] user-memory: updated {dest} (locale + org baseline block)")
 else:
     print(f"[install.sh] user-memory: {dest} already up to date")
 PY
