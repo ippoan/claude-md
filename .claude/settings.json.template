@@ -173,6 +173,11 @@
             "type": "command",
             "command": "/root/.claude/sources/claude-hooks/pre-pr-rebase-guard.sh",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "/root/.claude/hooks/pre-tool-pr-chat-bridge-reminder.sh",
+            "timeout": 5
           }
         ]
       },
