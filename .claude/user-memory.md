@@ -32,9 +32,9 @@ Do every task in this order; never skip a step.
    Do not start implementing on a bare `claude/...` branch with no issue. Write
    plans/designs as repo files (`docs/plan-<topic>.md`), reviewed via PR — not
    verbally in chat or the issue body.
-2. **PR** — when implementation/plan is ready, open a PR. Link the issue with
-   `Refs #N` (never `Closes/Fixes/Resolves`, see below). Whether you may open it:
-   see "Confirm before opening a PR".
+2. **PR** — when implementation/plan is ready, open a PR (no confirmation turn
+   needed, see "Open PRs after commit + push"). Link the issue with `Refs #N`
+   (never `Closes/Fixes/Resolves`, see below).
 3. **push** — commit and push the branch. In the same turn as opening the PR,
    call `mcp__github__subscribe_pr_activity` to watch CI. Do not `sleep`/poll.
 4. **fin** — CI green → (auto-)merge to `main`. Do not auto-close the issue; it
@@ -93,9 +93,8 @@ existing impl in the org (audit: ippoan/claude-md#76).
   PR, `subscribe_pr_activity`, wait for green, let the user decide.
 - **Commit/PR keywords**: ❌ `Closes/Fixes/Resolves #N` (auto-close breaks the
   release-time close check) → ✅ `Refs #N` / `Related to #N` / `Part of #N`.
-- **Confirm before opening a PR**: once you've committed + pushed, do NOT open a
-  PR on your own — ask the user first. Exception: the user explicitly said
-  "open the PR too" / "PR it when done" in the same conversation.
+- **Open PRs after commit + push**: once implementation/plan is committed and
+  pushed, open the PR directly — no separate confirmation turn required.
 - **After opening a PR**: in the same turn call `subscribe_pr_activity`, then end
   the turn (webhooks wake you; no `sleep`/`gh run watch`/polling).
 - **Release**: tags are cut via `workflow_dispatch` (`tag-release.yml`). Local
