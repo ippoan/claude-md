@@ -132,7 +132,7 @@ set -eu
 # .github/workflows/stamp-install-sh-version.yml. "dev" means "running from a
 # branch / locally". CI replaces this with the commit SHA so the .install-stamp
 # file lets fresh-env verification identify exactly which install.sh ran.
-INSTALL_SH_VERSION="2026.07.08-125333-33163b7"
+INSTALL_SH_VERSION="2026.07.17-093538-005a4d9"
 
 CLAUDE_HOME="${CLAUDE_HOME:-/root/.claude}"
 
