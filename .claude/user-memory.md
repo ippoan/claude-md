@@ -100,6 +100,24 @@ existing impl in the org (audit: ippoan/claude-md#76).
 - **Release**: tags are cut via `workflow_dispatch` (`tag-release.yml`). Local
   `git tag v*` is blocked by claude-hooks `tag-release-userprompt-guard.sh`.
 
+## Local-first testing (org default)
+
+Structure tests/local verification the same way in every repo (Refs
+ippoan/claude-md#102; implementation recipes: `local-first-testing` skill):
+
+1. **Pure logic isolation** — calculation/transform logic lives in pure
+   functions (no I/O), imported by UI/worker/API layers.
+2. **Single fixture set** — test input data is versioned in-repo
+   (`tests/fixtures/…`); unit tests AND the local-env seed script consume
+   the same fixtures. Expected values are golden files generated through
+   the real functions (never hand-computed), reviewed as PR diffs.
+3. **Local env = same-kind emulator + seed** — Workers repos: `wrangler dev`
+   local (R2/D1/KV/DO persist under `.wrangler/state`); Postgres repos:
+   docker-compose + migrate + seed.sql (rust-alc-api pattern). Provide an
+   `npm run seed:local`-style script that loads the shared fixtures. Never
+   invent a mock-DB schema that diverges from the prod storage shape.
+4. **Flow** — fixture → unit/golden green → seed + local visual check → PR.
+
 ## Secrets ★strict
 
 - **Never put a secret value (API key / token / private key) into LLM context,
