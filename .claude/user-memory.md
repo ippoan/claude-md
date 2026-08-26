@@ -63,7 +63,13 @@ compare, base64url, fetch wrapper, CORS, coverage script, …), check for an
 existing impl in the org (audit: ippoan/claude-md#76).
 
 - Check: (1) the `ippoan-lib-catalog` skill (capability → canonical lib),
-  (2) cross-repo search `grep -rn "<term>" /home/user/*/src` or ad-hoc ctags.
+  (2) the `semantic_code_search` MCP tool — meaning-based search across all
+  ippoan / ohishi-exp public repos (index: ippoan/code-search-index; mixing in
+  one technical term sharpens results; details in the `code-search` skill),
+  (3) cross-repo search `grep -rn "<term>" /home/user/*/src` or ad-hoc ctags.
+- Never ignore a `⚠ [code-search]` near-duplicate warning (surfaces in search
+  results, on Read/Edit via hook, and on push): check whether the twin file
+  needs the same change, and propose consolidation when feasible.
 - If a lib has it, consume it (`@ippoan/mcp-cf-workers`, `@ippoan/auth-client`,
   `@ippoan/egov-shinsei-sdk`, ci-workflows reusables, rust-alc-api `alc-*`
   crates, …). If it's missing something, add it to the lib and publish — don't
