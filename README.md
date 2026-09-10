@@ -484,6 +484,14 @@ CCoW セッションは以下のモデル分担を前提に運用する。
 
 **★ 登録は session を始める前に済ませること。** `hooks.<event>` の追加は次 session からしか効かず (上の「settings 反映遅延」表と同じ)、走っている session 中に `~/.claude/settings.json` を書き換えると drift 警告 hook (`pre-tool-claude-dir-drift.sh`) が鳴る。
 
+**★ 開発機で install.sh の smoke を回すときは `SKIP_PLUGINS=1` を付ける。**
+
+```sh
+CLAUDE_HOME=<temp>/.claude SKIP_SETTINGS=1 SKIP_HOOK=1 SKIP_CC_RELAY=1 SKIP_MCP=1 SKIP_PLUGINS=1 bash .claude/install.sh
+```
+
+理由は 2 つ。既定の `CLAUDE_HOME` は CCoW 前提の `/root/.claude` なので、開発機でそのまま回すと `mkdir: cannot create directory '/root'` で失敗する。さらに **section 7 (plugins) だけは `CLAUDE_HOME` を見ず `claude` CLI を呼ぶため、`CLAUDE_HOME` を退避先へ振り替えても実 `~/.claude` に marketplace の clone と plugin を書き込む** (`~/.claude/settings.json` に `enabledPlugins` / `extraKnownMarketplaces` が追加される)。開発機を汚したくない場合は `SKIP_PLUGINS=1` が要る。
+
 #### 注意
 
 - **worktree 判定は proxy にすぎない。** `SessionStart` payload に「`spawn_task` 起動か」を示す欄が無いので `cwd` で代用している。**親 (計画・レビュー役) が worktree 隔離で開かれると誤爆して Opus になる。** 気づいたら人が `/model` で戻す。
