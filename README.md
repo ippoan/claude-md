@@ -438,6 +438,66 @@ CCoW セッションは以下のモデル分担を前提に運用する。
 - Fable 5 は cybersecurity / biology 系の内容をセーフティ分類器が検知すると、自動で Opus にフォールバックする。セキュリティ関連のコードや記述を含むリポジトリでは、メインスレッドが意図せず Opus に切り替わることがある (初回リクエストで CLAUDE.md と git status を読む時点で発火しうる)。
 - `CLAUDE_CODE_SUBAGENT_MODEL=opus` を設定している間は、サブエージェント側で Fable を使う構成はできない (すべて Opus に潰れる)。
 
+### desktop (local) の `spawn_task` セッション — Refs [#106](https://github.com/ippoan/claude-md/issues/106)
+
+上の env は CCoW (Claude Code on the Web) の話。**Claude desktop から `spawn_task` チップで起動する local セッションには別の制約がある** (実測 2026-09-10):
+
+- **`spawn_task` 起動セッションは `CLAUDE_CODE_SUBAGENT_MODEL` の対象外。** この env は Agent tool のサブエージェント用で、チップから立つ独立セッションには効かない。チップ起動のセッションは**親セッションのモデルをそのまま継承する**。
+- **desktop 起動では `settings.json` の `model` が無視される** (project / user どちらも)。host app のモデル設定が `model` キーより優先されるため、親が Fable なら子も Fable で走る。
+- **`create_session` は cloud 限定**で、local Chrome を使う用途 (cdp-relay / pr-chat-bridge) には使えない。
+- `SessionStart` hook の payload に `model` は来ない (届くキーは `session_id` / `transcript_path` / `cwd` / `scratchpad_dir` / `hook_event_name` / `source`)。起動時点のモデルを hook から知る手段は無い。
+
+唯一効いた自動化経路が、**`SessionStart` hook が `initialUserMessage` で `/model <MODEL>` を流す**方法。会話先頭に local-command として入り、`PostModelSwitch` が `source=command` で発火する。チップの起動 prompt は置き換わらない。切替は "this session only" で settings は書き換わらない。
+
+#### hook 2 本 (opt-in。install.sh には載せていない)
+
+| hook | event | 役割 |
+|---|---|---|
+| [`.claude/hooks/session-start-model-switch.sh`](./.claude/hooks/session-start-model-switch.sh) | `SessionStart` | `source == "startup"` かつ `cwd` が `/.claude/worktrees/` 配下のときだけ `initialUserMessage: "/model <MODEL>"` を返す。`<MODEL>` は env `CLAUDE_SPAWN_MODEL` (既定 `claude-opus-4-8`)、allowlist `^[A-Za-z0-9._-]+$` 外なら無出力。`CLAUDE_SPAWN_MODEL_SKIP=1` で skip |
+| [`.claude/hooks/post-model-switch-record.sh`](./.claude/hooks/post-model-switch-record.sh) | `PostModelSwitch` | `from_model` / `to_model` / `requested_model` / `source` を `~/.claude/state/model-switch.log` に 1 行追記するだけ。出力なし |
+
+**この 2 本は `install.sh` の `HOOK_SCRIPTS` にも `settings.json.template` にも登録していない。** 既定では何も動かない。使う人が自分で下の手順を踏む。
+
+#### 使い方 (自分の `~/.claude/settings.json` に登録する)
+
+1. repo の hook を `~/.claude/hooks/` へ置く (symlink 推奨):
+
+   ```sh
+   ln -sfn <claude-md>/.claude/hooks/session-start-model-switch.sh  ~/.claude/hooks/session-start-model-switch.sh
+   ln -sfn <claude-md>/.claude/hooks/post-model-switch-record.sh    ~/.claude/hooks/post-model-switch-record.sh
+   ```
+
+2. `~/.claude/settings.json` の `hooks` に足す (既に同じ event があれば配列へ追記):
+
+   ```json
+   {
+     "hooks": {
+       "SessionStart": [
+         { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/session-start-model-switch.sh", "timeout": 10 }] }
+       ],
+       "PostModelSwitch": [
+         { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/post-model-switch-record.sh", "timeout": 10 }] }
+       ]
+     }
+   }
+   ```
+
+**★ 登録は session を始める前に済ませること。** `hooks.<event>` の追加は次 session からしか効かず (上の「settings 反映遅延」表と同じ)、走っている session 中に `~/.claude/settings.json` を書き換えると drift 警告 hook (`pre-tool-claude-dir-drift.sh`) が鳴る。
+
+**★ 開発機で install.sh の smoke を回すときは `SKIP_PLUGINS=1` を付ける。**
+
+```sh
+CLAUDE_HOME=<temp>/.claude SKIP_SETTINGS=1 SKIP_HOOK=1 SKIP_CC_RELAY=1 SKIP_MCP=1 SKIP_PLUGINS=1 bash .claude/install.sh
+```
+
+理由は 2 つ。既定の `CLAUDE_HOME` は CCoW 前提の `/root/.claude` なので、開発機でそのまま回すと `mkdir: cannot create directory '/root'` で失敗する。さらに **section 7 (plugins) だけは `CLAUDE_HOME` を見ず `claude` CLI を呼ぶため、`CLAUDE_HOME` を退避先へ振り替えても実 `~/.claude` に marketplace の clone と plugin を書き込む** (`~/.claude/settings.json` に `enabledPlugins` / `extraKnownMarketplaces` が追加される)。開発機を汚したくない場合は `SKIP_PLUGINS=1` が要る。
+
+#### 注意
+
+- **worktree 判定は proxy にすぎない。** `SessionStart` payload に「`spawn_task` 起動か」を示す欄が無いので `cwd` で代用している。**親 (計画・レビュー役) が worktree 隔離で開かれると誤爆して Opus になる。** 気づいたら人が `/model` で戻す。
+- **desktop の画面のモデル表示は追随しない。** composer 右下は親のモデルのままになる。切り替わったかの確認は transcript の `message.model` か `~/.claude/state/model-switch.log` (上の記録 hook) で行う。表示が古いままのタブでモデルセレクタを触ると、アプリ側の値で戻る可能性がある。
+- 配布 (`install.sh` / `settings.json.template`) に乗せるかは、しばらく手動運用してから別 issue で判断する。
+
 ## 関連
 
 - 検証セッションのきっかけ: [ippoan/cc-relay#37](https://github.com/ippoan/cc-relay/issues/37) Phase F 検証中に「5 repo の CLAUDE.md 揺らぎが大きすぎる」と判明
